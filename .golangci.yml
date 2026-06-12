@@ -1,0 +1,20 @@
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+
+run:
+  timeout: 3m
+  go: "1.25"
+
+issues:
+  exclude-dirs:
+    - ui
+    - node_modules
+    - tests
