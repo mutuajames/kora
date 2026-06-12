@@ -34,11 +34,11 @@ dev:                               ## Full dev setup: MySQL + build + setup + se
 	@echo "Starting server on :$(PORT)..."
 	./kora serve --port $(PORT)
 
-setup:                             ## Setup a site (SITE=airtime.local CONFIG=config/airtime/)
+setup: build                       ## Build + setup a site (SITE=airtime.local CONFIG=config/airtime/)
 	./kora setup --site $(SITE) --path $(CONFIG) --db-user $(DB_USER) --db-pass $(DB_PASS) --admin-email $(ADMIN_EMAIL) --admin-password $(ADMIN_PASS)
 
-serve:                             ## Start the server
-	go run . serve --port $(PORT)
+serve: build                       ## Build + start the server
+	./kora serve --port $(PORT)
 
 ## Quality
 test:                              ## Run Go tests
