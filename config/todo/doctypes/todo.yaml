@@ -1,0 +1,46 @@
+name: Todo
+module: Tasks
+title_field: title
+search_fields: title, description
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: title
+    fieldtype: Data
+    label: Task
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Pending
+      In Progress
+      Done
+    default: Pending
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: priority
+    fieldtype: Select
+    label: Priority
+    options: |
+      Low
+      Medium
+      High
+    default: Medium
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due Date
+    in_list_view: true

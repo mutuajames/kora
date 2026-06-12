@@ -1,0 +1,13 @@
+- doctype: Todo
+  role: Todo User
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+
+- doctype: Todo
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
