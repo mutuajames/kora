@@ -5,25 +5,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Run
 
 ```bash
+make dev                # MySQL + build + setup + serve (one command)
+make build              # Build UI + Go binary
+make serve              # Start server on :8000
+make setup              # Setup a site (SITE=airtime.local CONFIG=config/airtime/)
+make test               # Run Go tests
+make lint               # Run linters (Go + TypeScript)
+make fmt                # Format code
+make release TAG=v0.2.0 # Tag and push a release
+make help               # Show all commands
+```
+
+### Manual Commands
+
+```bash
 # Backend (Go)
 go build -o kora .                           # Build binary
 go run . serve --port 8000                   # Dev run
-go run . setup --site airtime.local ...      # One-command site setup
 go run . migrate --all                       # Apply all pending migrations
 go run . config import --site X --path Y     # Re-import YAML config to DB
-go test ./...                                # Run tests
 
 # Frontend (React SPA in ui/)
 cd ui && bun install                         # Install deps
 cd ui && bun run build                       # Build SPA → dist/
 cd ui && bun run dev                         # Dev server (proxies /api → :8000)
 
-# Full build (SPA must be built first — embedded via go:embed)
-cd ui && bun run build && cp -r dist ../workspace/dist && cd .. && go build -o kora .
-
 # Docker
 docker compose up -d mysql                   # MySQL 8.0 (root:kora123)
-docker compose up -d                         # MySQL + Redis
 ```
 
 ## Architecture

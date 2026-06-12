@@ -1,0 +1,70 @@
+.PHONY: build build-ui build-go dev setup serve test lint clean release
+
+# Defaults
+SITE ?= airtime.local
+CONFIG ?= config/airtime/
+PORT ?= 8000
+DB_USER ?= root
+DB_PASS ?= kora123
+ADMIN_EMAIL ?= admin@airtime.local
+ADMIN_PASS ?= admin123
+TAG ?= v0.1.0
+
+## Build
+build: build-ui build-go          ## Build UI + Go binary
+
+build-ui:                          ## Build React SPA
+	cd ui && bun install --frozen-lockfile
+	cd ui && bun run build
+	rm -rf workspace/dist
+	cp -r ui/dist workspace/dist
+
+build-go:                          ## Build Go binary
+	go build -o kora .
+
+## Development
+dev:                               ## Full dev setup: MySQL + build + setup + serve
+	@echo "Starting MySQL..."
+	docker compose up -d mysql
+	@sleep 3
+	@echo "Building..."
+	$(MAKE) build
+	@echo "Setting up site $(SITE)..."
+	./kora setup --site $(SITE) --path $(CONFIG) --db-user $(DB_USER) --db-pass $(DB_PASS) --admin-email $(ADMIN_EMAIL) --admin-password $(ADMIN_PASS)
+	@echo "Starting server on :$(PORT)..."
+	./kora serve --port $(PORT)
+
+setup:                             ## Setup a site (SITE=airtime.local CONFIG=config/airtime/)
+	./kora setup --site $(SITE) --path $(CONFIG) --db-user $(DB_USER) --db-pass $(DB_PASS) --admin-email $(ADMIN_EMAIL) --admin-password $(ADMIN_PASS)
+
+serve:                             ## Start the server
+	go run . serve --port $(PORT)
+
+## Quality
+test:                              ## Run Go tests
+	go test ./... -v -count=1
+
+lint:                              ## Run linters
+	golangci-lint run --timeout=3m
+	cd ui && bunx tsc -b --noEmit
+
+fmt:                               ## Format code
+	go fmt ./...
+	cd ui && bunx prettier --write 'src/**/*.{ts,tsx}'
+
+## Release
+release:                           ## Tag and push a release (TAG=v0.2.0)
+	@test -n "$(TAG)" || (echo "Usage: make release TAG=v0.2.0" && exit 1)
+	git tag -a $(TAG) -m "$(TAG)"
+	git push origin $(TAG)
+	@echo "Release $(TAG) pushed — GitHub Actions will create the release."
+
+## Cleanup
+clean:                             ## Remove build artifacts
+	rm -rf kora workspace/dist ui/dist ui/node_modules
+
+## Help
+help:                              ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+.DEFAULT_GOAL := help

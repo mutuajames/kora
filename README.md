@@ -5,10 +5,33 @@ Define your application — data model, permissions, workflows — in YAML. Kora
 ## Quick Start
 
 ```bash
-docker compose up -d mysql                           # Start MySQL
-cd ui && bun install && bun run build && cp -r dist ../workspace/dist && cd ..  # Build UI
-go run . setup --site airtime.local --path config/airtime/ --db-user root --db-pass kora123 --admin-email admin@airtime.local --admin-password admin123
-go run . serve --port 8000                           # Start server
+make dev                           # MySQL + build + setup + serve
+```
+
+Or step by step:
+
+```bash
+docker compose up -d mysql         # Start MySQL
+make build                         # Build UI + Go binary
+make setup                         # Setup airtime site
+make serve                         # Start server on :8000
+```
+
+Open **http://localhost:8000/workspace** — login with `admin@airtime.local` / `admin123`.
+
+### All Make Commands
+
+```
+make dev          Full setup: MySQL + build + setup + serve
+make build        Build UI + Go binary
+make serve        Start server
+make setup        Setup a site (override: SITE=fieldwork.local CONFIG=config/fieldwork/)
+make test         Run Go tests
+make lint         Run linters (Go + TypeScript)
+make fmt          Format code (go fmt + prettier)
+make release      Tag and push a release (TAG=v0.2.0)
+make clean        Remove build artifacts
+make help         Show all commands
 ```
 
 Open **http://localhost:8000/workspace** — login with `admin@airtime.local` / `admin123`.
@@ -59,6 +82,15 @@ kora/
 
 ## Tech Stack
 
-**Backend:** Go 1.25, Gin, MySQL 8.0, expr-lang/expr, Cobra CLI, autocert (Let's Encrypt)
-**Frontend:** React 19, TanStack Router/Query/Table/Form, shadcn/ui, Tailwind CSS v4, Zustand
-**Single binary:** Everything embedded via `go:embed` — no separate deployment
+| Layer | Technology |
+|---|---|
+| **Language** | Go 1.25 |
+| **HTTP** | Gin, net/http |
+| **Database** | MySQL 8.0 |
+| **Expressions** | expr-lang/expr |
+| **CLI** | Cobra |
+| **TLS** | autocert (Let's Encrypt) |
+| **Frontend** | React 19, TanStack Router/Query/Table/Form, shadcn/ui, Tailwind CSS v4 |
+| **State** | Zustand, TanStack Query |
+| **Validation** | Zod |
+| **Delivery** | Single binary — everything via `go:embed` |
