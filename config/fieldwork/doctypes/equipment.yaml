@@ -1,0 +1,53 @@
+name: Equipment
+module: Fieldwork
+title_field: equipment_name
+search_fields: equipment_name, serial_number
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: equipment_name
+    fieldtype: Data
+    label: Equipment Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: serial_number
+    fieldtype: Data
+    label: Serial Number
+    in_list_view: true
+    search_index: true
+
+  - fieldname: customer
+    fieldtype: Link
+    label: Customer
+    options: Customer
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+    constraints:
+      - type: exists
+        message: "Customer does not exist."
+
+  - fieldname: equipment_type
+    fieldtype: Select
+    label: Equipment Type
+    options: |
+      HVAC
+      Electrical
+      Plumbing
+      Mechanical
+      Other
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+    description: Where the equipment is installed at the customer site.
+
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

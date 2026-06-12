@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+ui/dist/
+workspace/dist/
+kora
+/tmp/
+
+# Binary
+/kora
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+*.log
+
+# Docker
+mysql_data/

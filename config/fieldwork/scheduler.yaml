@@ -1,0 +1,24 @@
+jobs:
+  - name: overdue_work_order_alert
+    type: doctype_alert
+    schedule: "0 9 * * *"
+    config:
+      doctype: Work Order
+      filters:
+        - [status, in, [Approved, In Progress]]
+        - [scheduled_date, <, today]
+      notify_field: assigned_technician
+      subject: "Overdue: Work Order {title}"
+      message: "Work Order {title} for {customer} is past its scheduled date."
+
+  - name: weekly_summary
+    type: email_report
+    schedule: "0 8 * * MON"
+    config:
+      doctype: Work Order
+      filters:
+        - [status, =, Completed]
+      recipients:
+        - email: manager@fieldwork.local
+      subject: "Weekly Work Order Summary"
+      message: "Completed work orders this week:"

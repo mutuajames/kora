@@ -1,0 +1,107 @@
+name: Order
+module: Airtime
+is_submittable: true
+track_changes: true
+title_field: title
+search_fields: title, customer
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: title
+    fieldtype: Data
+    label: Order Title
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: column_1
+    fieldtype: Column Break
+
+  - fieldname: customer
+    fieldtype: Link
+    label: Customer
+    options: Customer
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: payment_method
+    fieldtype: Select
+    label: Payment Method
+    options: |
+      M-Pesa
+      Airtel Money
+      Bank Transfer
+      Cash
+      Credit
+    reqd: true
+    in_list_view: true
+
+  - fieldname: column_2
+    fieldtype: Column Break
+
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Confirmed
+      Processing
+      Delivered
+      Completed
+      Cancelled
+    default: Draft
+    read_only: true
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: payment_reference
+    fieldtype: Data
+    label: Payment Reference
+    description: M-Pesa code or bank transaction ID.
+
+  - fieldname: section_items
+    fieldtype: Section Break
+    label: Order Items
+
+  - fieldname: items
+    fieldtype: Table
+    label: Items
+    options: Order Item
+    constraints:
+      - type: min_rows
+        value: 1
+        message: At least one item is required.
+
+  - fieldname: section_totals
+    fieldtype: Section Break
+    label: Order Totals
+
+  - fieldname: subtotal
+    fieldtype: Currency
+    label: Subtotal (KES)
+    computed: "SUM(items.line_total)"
+    read_only: true
+    description: Auto-computed sum of all line totals.
+
+  - fieldname: discount
+    fieldtype: Currency
+    label: Discount (KES)
+    default: "0"
+
+  - fieldname: total
+    fieldtype: Currency
+    label: Total (KES)
+    computed: "ROUND(subtotal - discount, 2)"
+    read_only: true
+    description: Auto-computed from subtotal minus discount.
+
+  - fieldname: section_notes
+    fieldtype: Section Break
+    label: Notes
+
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

@@ -1,0 +1,77 @@
+name: Service Report
+module: Fieldwork
+is_submittable: true
+track_changes: true
+title_field: title
+search_fields: title, work_order, technician
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: title
+    fieldtype: Data
+    label: Title
+    reqd: true
+    bold: true
+    in_list_view: true
+
+  - fieldname: work_order
+    fieldtype: Link
+    label: Work Order
+    options: Work Order
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+    constraints:
+      - type: exists
+        message: "Work Order does not exist."
+
+  - fieldname: technician
+    fieldtype: Link
+    label: Technician
+    options: Technician
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+    constraints:
+      - type: exists
+        message: "Technician does not exist."
+
+  - fieldname: service_date
+    fieldtype: Date
+    label: Service Date
+    reqd: true
+    in_list_view: true
+
+  - fieldname: arrival_time
+    fieldtype: Time
+    label: Arrival Time
+
+  - fieldname: departure_time
+    fieldtype: Time
+    label: Departure Time
+
+  - fieldname: work_performed
+    fieldtype: Text Editor
+    label: Work Performed
+    reqd: true
+
+  - fieldname: parts_used
+    fieldtype: Text
+    label: Parts Used
+
+  - fieldname: recommendations
+    fieldtype: Text Editor
+    label: Recommendations
+
+  - fieldname: customer_signature
+    fieldtype: Attach Image
+    label: Customer Signature
+
+doc_constraints:
+  - type: cross_field
+    description: "Departure time must be after arrival time."
+    lhs: departure_time
+    operator: ">="
+    rhs: arrival_time
+    message: "Departure time must be on or after arrival time."

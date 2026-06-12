@@ -1,0 +1,54 @@
+name: Technician
+module: Fieldwork
+title_field: full_name
+search_fields: full_name, employee_id, email
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: full_name
+    fieldtype: Data
+    label: Full Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: employee_id
+    fieldtype: Data
+    label: Employee ID
+    reqd: true
+    unique: true
+    in_list_view: true
+
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+    options: Email
+    reqd: true
+    in_list_view: true
+
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    options: Phone
+    in_list_view: true
+
+  - fieldname: specialization
+    fieldtype: Select
+    label: Specialization
+    options: |
+      HVAC
+      Electrical
+      Plumbing
+      Mechanical
+      General
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: is_active
+    fieldtype: Check
+    label: Active
+    default: "1"
+    in_list_view: true
+    in_standard_filter: true

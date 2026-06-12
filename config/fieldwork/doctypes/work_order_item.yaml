@@ -1,0 +1,47 @@
+name: Work Order Item
+module: Fieldwork
+is_child_table: true
+title_field: equipment
+sort_field: idx
+sort_order: ASC
+
+fields:
+  - fieldname: equipment
+    fieldtype: Link
+    label: Equipment
+    options: Equipment
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: exists
+        message: "Equipment does not exist."
+
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+    reqd: true
+    in_list_view: true
+
+  - fieldname: estimated_hours
+    fieldtype: Float
+    label: Estimated Hours
+    constraints:
+      - type: min
+        value: 0.25
+        message: "Estimated hours must be at least 0.25."
+      - type: max
+        value: 12
+        message: "Estimated hours cannot exceed 12."
+
+  - fieldname: actual_hours
+    fieldtype: Float
+    label: Actual Hours
+    constraints:
+      - type: min
+        value: 0
+        message: "Actual hours cannot be negative."
+
+  - fieldname: completed
+    fieldtype: Check
+    label: Completed
+    default: "0"

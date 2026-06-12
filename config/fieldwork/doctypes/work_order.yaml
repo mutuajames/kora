@@ -1,0 +1,105 @@
+name: Work Order
+module: Fieldwork
+is_submittable: true
+track_changes: true
+title_field: title
+search_fields: title, customer
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: title
+    fieldtype: Data
+    label: Title
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: customer
+    fieldtype: Link
+    label: Customer
+    options: Customer
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+    constraints:
+      - type: exists
+        message: "Customer does not exist."
+
+  - fieldname: priority
+    fieldtype: Select
+    label: Priority
+    options: |
+      Low
+      Medium
+      High
+      Critical
+    default: Medium
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: assigned_technician
+    fieldtype: Link
+    label: Assigned Technician
+    options: Technician
+    constraints:
+      - type: exists
+        message: "Technician does not exist."
+
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Submitted
+      Approved
+      In Progress
+      Completed
+      Rejected
+    default: Draft
+    read_only: true
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: scheduled_date
+    fieldtype: Date
+    label: Scheduled Date
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min_date
+        value: today
+        message: "Scheduled date cannot be in the past."
+
+  - fieldname: estimated_hours
+    fieldtype: Float
+    label: Estimated Hours
+    constraints:
+      - type: min
+        value: 0.5
+        message: "Estimated hours must be at least 0.5."
+      - type: max
+        value: 24
+        message: "Estimated hours cannot exceed 24."
+
+  - fieldname: section_items
+    fieldtype: Section Break
+    label: Items to Service
+
+  - fieldname: items
+    fieldtype: Table
+    label: Items
+    options: Work Order Item
+    constraints:
+      - type: min_rows
+        value: 1
+        message: "At least one item must be added to a work order."
+
+  - fieldname: section_notes
+    fieldtype: Section Break
+    label: Notes
+
+  - fieldname: description
+    fieldtype: Text Editor
+    label: Description

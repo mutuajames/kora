@@ -1,0 +1,79 @@
+- doctype: Work Order
+  role: Field Technician
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: false
+  cancel: false
+  if_owner: true
+
+- doctype: Work Order
+  role: Service Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+  submit: true
+  cancel: true
+  if_owner: false
+
+- doctype: Customer
+  role: Field Technician
+  read: true
+  write: false
+  create: true
+  delete: false
+
+- doctype: Customer
+  role: Service Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Equipment
+  role: Field Technician
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Equipment
+  role: Service Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+
+- doctype: Technician
+  role: Field Technician
+  read: true
+  write: false
+  create: false
+  delete: false
+
+- doctype: Technician
+  role: Service Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Service Report
+  role: Field Technician
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+  if_owner: true
+
+- doctype: Service Report
+  role: Service Manager
+  read: true
+  write: true
+  create: true
+  delete: true
+  submit: true
+  if_owner: false

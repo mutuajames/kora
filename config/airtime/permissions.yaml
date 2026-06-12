@@ -1,0 +1,59 @@
+- doctype: Customer
+  role: Sales Agent
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Customer
+  role: Administrator
+  read: true
+  write: true
+  create: true
+  delete: true
+
+- doctype: Product
+  role: Sales Agent
+  read: true
+  write: false
+  create: false
+  delete: false
+
+- doctype: Product
+  role: Administrator
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Order
+  role: Sales Agent
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+  if_owner: true
+
+- doctype: Order
+  role: Administrator
+  read: true
+  write: true
+  create: true
+  delete: true
+  submit: true
+  if_owner: false
+
+- doctype: Order Item
+  role: Sales Agent
+  read: true
+  write: true
+  create: true
+  delete: false
+
+- doctype: Order Item
+  role: Administrator
+  read: true
+  write: true
+  create: true
+  delete: true

@@ -1,0 +1,70 @@
+name: Product
+module: Airtime
+title_field: product_name
+search_fields: product_name, network
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: product_name
+    fieldtype: Data
+    label: Product Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: network
+    fieldtype: Select
+    label: Network Provider
+    options: |
+      Safaricom
+      Airtel
+      Telkom
+      Equitel
+      JTL
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: product_type
+    fieldtype: Select
+    label: Product Type
+    options: |
+      Airtime
+      Data Bundle
+      Voice Bundle
+      SMS Bundle
+      Combo Bundle
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: buying_price
+    fieldtype: Currency
+    label: Buying Price (KES)
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 5
+        message: "Minimum buying price is KES 5."
+      - type: max
+        value: 50000
+        message: "Maximum buying price is KES 50,000."
+
+  - fieldname: selling_price
+    fieldtype: Currency
+    label: Selling Price (KES)
+    reqd: true
+    constraints:
+      - type: min
+        value: 1
+        message: "Selling price must be at least KES 1."
+
+  - fieldname: is_available
+    fieldtype: Check
+    label: Available for Sale
+    default: "1"
+    in_list_view: true
+    in_standard_filter: true

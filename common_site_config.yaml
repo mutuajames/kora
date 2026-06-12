@@ -1,0 +1,43 @@
+# Kora Common Site Configuration
+# Settings shared across all sites. Override per-site in site_config.yaml.
+
+# Infrastructure
+redis_url: redis://localhost:6379/0
+db_host: 127.0.0.1
+http_port: 8000
+workers: 4
+
+# Logging
+log_level: info          # debug | info | warn | error
+log_format: json         # json | text
+
+# Branding
+app_name: Kora
+version: "0.1.0"
+primary_color: "#2563eb"
+
+# Session & security
+session_lifetime_hours: 24
+csrf_secure: false       # Set true in production with TLS
+admin_role: Administrator
+
+# Rate limiting
+rate_limit_rps: 100      # Requests per second per user
+rate_limit_burst: 20
+
+# Database connection pool
+db_max_open_conns: 25
+db_max_idle_conns: 5
+
+# API pagination
+api_default_limit: 50
+api_max_limit: 500
+
+# HTTP server timeouts (seconds)
+read_timeout_secs: 30
+write_timeout_secs: 30
+idle_timeout_secs: 120
+
+# TLS
+tls_mode: off            # off | auto | manual
+tls_email: ""

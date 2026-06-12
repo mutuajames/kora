@@ -1,0 +1,104 @@
+import { useState } from 'react'
+import { useParams, useNavigate } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { fetchDoctypeSchema } from '@/lib/api/system'
+import { fetchList } from '@/lib/api/resources'
+import { DataTable } from '@/components/tables/DataTable'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Plus } from 'lucide-react'
+import type { Document, DocType } from '@/types/kora'
+
+export default function ListPage() {
+  const { doctype } = useParams({ from: '/workspace/$doctype' })
+  const navigate = useNavigate()
+
+  const [page, setPage] = useState(0)
+  const [sorting, setSorting] = useState<{ field: string; order: string } | null>(null)
+  const limit = 50
+
+  const schemaQuery = useQuery({
+    queryKey: ['doctype', doctype],
+    queryFn: () => fetchDoctypeSchema(doctype),
+    staleTime: 5 * 60_000,
+  })
+
+  const listQuery = useQuery({
+    queryKey: ['resource', doctype, page, sorting],
+    queryFn: () =>
+      fetchList(doctype, {
+        limit,
+        offset: page * limit,
+        order_by: sorting ? `${sorting.field} ${sorting.order}` : undefined,
+      }),
+    staleTime: 15_000,
+    placeholderData: (prev) => prev,
+  })
+
+  const dt: DocType | undefined = schemaQuery.data?.doctype
+  const listFields = dt?.fields?.filter((f) => f.in_list_view && !isLayoutField(f.fieldtype)) ?? []
+  const total = listQuery.data?.meta?.total ?? 0
+  const totalPages = Math.ceil(total / limit)
+
+  if (schemaQuery.isLoading || listQuery.isLoading) {
+    return (
+      <div className="p-8 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    )
+  }
+
+  if (schemaQuery.isError || !dt) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <p className="text-muted-foreground">DocType "{doctype}" not found.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-8">
+      {/* Header */}
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{dt.name}</h1>
+          <p className="text-sm text-muted-foreground">
+            {total} record{total !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <Button onClick={() => navigate({ to: '/workspace/$doctype/new', params: { doctype } })}>
+          <Plus className="mr-2 h-4 w-4" />
+          New {dt.name}
+        </Button>
+      </div>
+
+      {/* Table */}
+      <DataTable
+        columns={listFields}
+        data={(listQuery.data?.data as Document[]) ?? []}
+        titleField={dt.title_field}
+        total={total}
+        page={page}
+        totalPages={totalPages}
+        sorting={sorting}
+        onSortingChange={setSorting}
+        onPageChange={setPage}
+        onRowClick={(doc) =>
+          navigate({
+            to: '/workspace/$doctype/$name',
+            params: { doctype, name: doc.name },
+          })
+        }
+        isEmpty={!listQuery.isFetching && total === 0}
+        isFetching={listQuery.isFetching}
+        isError={listQuery.isError}
+        onRetry={() => listQuery.refetch()}
+      />
+    </div>
+  )
+}
+
+function isLayoutField(fieldtype: string): boolean {
+  return ['Section Break', 'Column Break', 'Heading', 'Table'].includes(fieldtype)
+}

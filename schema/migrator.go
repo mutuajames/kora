@@ -1,0 +1,425 @@
+// Package schema manages database schema migration.
+// It compares the DocType registry against the live database schema
+// and generates/applies DDL to make them match.
+package schema
+
+import (
+	"database/sql"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/yourorg/kora/doctype"
+)
+
+// ColumnInfo represents a column in the live database schema.
+type ColumnInfo struct {
+	Name     string
+	Type     string
+	Nullable bool
+	Default  sql.NullString
+	Indexed  bool
+}
+
+// TableInfo represents a table in the live database schema.
+type TableInfo struct {
+	Name    string
+	Columns map[string]*ColumnInfo
+}
+
+// Diff represents the difference between the registry and the live schema.
+type Diff struct {
+	NewTables    []string            // Tables to CREATE
+	NewColumns   map[string][]ColumnAdd // Table → columns to ADD
+	NewIndexes   map[string][]IndexAdd  // Table → indexes to CREATE
+	Orphaned     []OrphanedColumn       // Columns in DB but not in registry
+}
+
+// ColumnAdd describes a column to be added to an existing table.
+type ColumnAdd struct {
+	Name     string
+	Type     string
+	Nullable bool
+	Default  string
+}
+
+// IndexAdd describes an index to be created.
+type IndexAdd struct {
+	Table   string
+	Columns []string
+	Unique  bool
+}
+
+// OrphanedColumn is a column that exists in the database but not in the registry.
+type OrphanedColumn struct {
+	Table  string
+	Column string
+}
+
+// LoadLiveSchema reads the current database schema from INFORMATION_SCHEMA.
+func LoadLiveSchema(db *sql.DB, dbName string) (map[string]*TableInfo, error) {
+	rows, err := db.Query(`
+		SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+		FROM INFORMATION_SCHEMA.COLUMNS
+		WHERE TABLE_SCHEMA = ?
+		ORDER BY TABLE_NAME, ORDINAL_POSITION
+	`, dbName)
+	if err != nil {
+		return nil, fmt.Errorf("querying information_schema: %w", err)
+	}
+	defer rows.Close()
+
+	tables := make(map[string]*TableInfo)
+	for rows.Next() {
+		var tableName, colName, colType, isNullable string
+		var colDefault sql.NullString
+		if err := rows.Scan(&tableName, &colName, &colType, &isNullable, &colDefault); err != nil {
+			return nil, fmt.Errorf("scanning column info: %w", err)
+		}
+
+		table, ok := tables[tableName]
+		if !ok {
+			table = &TableInfo{
+				Name:    tableName,
+				Columns: make(map[string]*ColumnInfo),
+			}
+			tables[tableName] = table
+		}
+
+		table.Columns[colName] = &ColumnInfo{
+			Name:     colName,
+			Type:     colType,
+			Nullable: isNullable == "YES",
+			Default:  colDefault,
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating schema rows: %w", err)
+	}
+
+	// Load indexes.
+	idxRows, err := db.Query(`
+		SELECT TABLE_NAME, COLUMN_NAME, INDEX_NAME, NON_UNIQUE
+		FROM INFORMATION_SCHEMA.STATISTICS
+		WHERE TABLE_SCHEMA = ?
+		ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+	`, dbName)
+	if err != nil {
+		return nil, fmt.Errorf("querying indexes: %w", err)
+	}
+	defer idxRows.Close()
+
+	for idxRows.Next() {
+		var tableName, colName, indexName string
+		var nonUnique int
+		if err := idxRows.Scan(&tableName, &colName, &indexName, &nonUnique); err != nil {
+			return nil, fmt.Errorf("scanning index info: %w", err)
+		}
+		// Skip PRIMARY KEY indexes.
+		if indexName == "PRIMARY" {
+			continue
+		}
+		if table, ok := tables[tableName]; ok {
+			if col, ok := table.Columns[colName]; ok {
+				col.Indexed = true
+			}
+		}
+	}
+
+	return tables, nil
+}
+
+// ComputeDiff compares the registry DocTypes against the live database schema
+// and produces a Diff of changes needed.
+func ComputeDiff(registry *doctype.Registry, liveSchema map[string]*TableInfo) *Diff {
+	diff := &Diff{
+		NewColumns: make(map[string][]ColumnAdd),
+		NewIndexes: make(map[string][]IndexAdd),
+	}
+
+	for _, dt := range registry.All() {
+		tableName := dt.RawTableName()
+		liveTable, exists := liveSchema[tableName]
+
+		if !exists {
+			// Table doesn't exist — needs to be created.
+			diff.NewTables = append(diff.NewTables, tableName)
+			continue
+		}
+
+		// Check for new columns.
+		for _, field := range dt.DataFields() {
+			if field.Fieldtype == "Table" {
+				// Table fields are handled as separate child tables.
+				continue
+			}
+			if _, exists := liveTable.Columns[field.Fieldname]; !exists {
+				colAdd := ColumnAdd{
+					Name:     field.Fieldname,
+					Type:     field.DBType(),
+					Nullable: !field.Reqd,
+				}
+				if field.Default != "" {
+					colAdd.Default = field.Default
+				}
+				diff.NewColumns[tableName] = append(diff.NewColumns[tableName], colAdd)
+			}
+		}
+
+		// Check for new indexes.
+		for _, field := range dt.DataFields() {
+			if field.SearchIndex && field.IsDataField() {
+				if col, exists := liveTable.Columns[field.Fieldname]; exists && !col.Indexed {
+					diff.NewIndexes[tableName] = append(diff.NewIndexes[tableName], IndexAdd{
+						Table:   tableName,
+						Columns: []string{field.Fieldname},
+						Unique:  field.Unique,
+					})
+				}
+			}
+		}
+
+		// Detect orphaned columns (columns in DB but not in registry).
+		registryFields := make(map[string]bool)
+		for _, f := range dt.DataFields() {
+			registryFields[f.Fieldname] = true
+		}
+		// Add system columns.
+		for _, sc := range doctype.SystemColumns() {
+			registryFields[sc.Name] = true
+		}
+
+		for colName := range liveTable.Columns {
+			if !registryFields[colName] {
+				diff.Orphaned = append(diff.Orphaned, OrphanedColumn{
+					Table:  tableName,
+					Column: colName,
+				})
+			}
+		}
+	}
+
+	// Check for child tables (separate from main loop — applies even when parent is new).
+	for _, dt := range registry.All() {
+		for _, field := range dt.TableFields() {
+			childTableName := dt.RawChildTableName(field.Fieldname)
+			if _, exists := liveSchema[childTableName]; !exists {
+				// Avoid duplicate entries.
+				found := false
+				for _, nt := range diff.NewTables {
+					if nt == childTableName {
+						found = true
+						break
+					}
+				}
+				if !found {
+					diff.NewTables = append(diff.NewTables, childTableName)
+				}
+			}
+		}
+	}
+
+	return diff
+}
+
+// IsEmpty returns true if there are no changes to apply.
+func (d *Diff) IsEmpty() bool {
+	return len(d.NewTables) == 0 && len(d.NewColumns) == 0 && len(d.NewIndexes) == 0
+}
+
+// GenerateDDL produces the SQL statements to apply the diff.
+func (d *Diff) GenerateDDL(registry *doctype.Registry) []string {
+	var statements []string
+
+	// CREATE TABLE statements.
+	for _, tableName := range d.NewTables {
+		stmt := generateCreateTable(tableName, registry)
+		statements = append(statements, stmt)
+	}
+
+	// ALTER TABLE ADD COLUMN statements.
+	for tableName, cols := range d.NewColumns {
+		for _, col := range cols {
+			stmt := generateAddColumn(tableName, col)
+			statements = append(statements, stmt)
+		}
+	}
+
+	// CREATE INDEX statements.
+	for tableName, idxs := range d.NewIndexes {
+		for _, idx := range idxs {
+			stmt := generateCreateIndex(tableName, idx)
+			statements = append(statements, stmt)
+		}
+	}
+
+	return statements
+}
+
+func generateCreateTable(tableName string, registry *doctype.Registry) string {
+	// Determine if this is a regular table or a child table.
+	var dt *doctype.DocType
+	var isChild bool
+	var parentDT *doctype.DocType
+	var parentField string
+
+	for _, d := range registry.All() {
+		if d.RawTableName() == tableName {
+			dt = d
+			break
+		}
+		// Check child tables.
+		for _, f := range d.TableFields() {
+			if d.RawChildTableName(f.Fieldname) == tableName {
+				isChild = true
+				parentDT = d
+				parentField = f.Fieldname
+				dt = registry.Get(f.Options)
+				break
+			}
+		}
+		if dt != nil {
+			break
+		}
+	}
+
+	// Use quoted table name for SQL.
+	sqlTableName := "`" + tableName + "`"
+
+	var cols []string
+
+	// System columns first.
+	cols = append(cols, "name VARCHAR(140) NOT NULL")
+	cols = append(cols, "owner VARCHAR(140) NOT NULL DEFAULT ''")
+	cols = append(cols, "creation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)")
+	cols = append(cols, "modified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)")
+	cols = append(cols, "modified_by VARCHAR(140) NOT NULL DEFAULT ''")
+	cols = append(cols, "doc_status TINYINT(1) NOT NULL DEFAULT 0")
+	cols = append(cols, "idx INT NOT NULL DEFAULT 0")
+
+	// Child table system columns.
+	if isChild {
+		_ = parentDT
+		_ = parentField
+		cols = append(cols, "parent VARCHAR(140) NOT NULL DEFAULT ''")
+		cols = append(cols, "parentfield VARCHAR(140) NOT NULL DEFAULT ''")
+		cols = append(cols, "parenttype VARCHAR(140) NOT NULL DEFAULT ''")
+	}
+
+	// Data columns from the DocType.
+	if dt != nil {
+		for _, f := range dt.DataFields() {
+			if f.Fieldtype == "Table" {
+				continue
+			}
+			dbType := f.DBType()
+			if dbType == "" {
+				continue
+			}
+			nullable := ""
+			if !f.Reqd {
+				nullable = " DEFAULT NULL"
+			} else {
+				nullable = " NOT NULL"
+			}
+			if f.Default != "" && f.Reqd {
+				nullable = fmt.Sprintf(" NOT NULL DEFAULT '%s'", escapeSQL(f.Default))
+			} else if f.Default != "" {
+				nullable = fmt.Sprintf(" DEFAULT '%s'", escapeSQL(f.Default))
+			}
+			cols = append(cols, fmt.Sprintf("%s %s%s", f.Fieldname, dbType, nullable))
+		}
+	}
+
+	// Primary key.
+	cols = append(cols, "PRIMARY KEY (name)")
+
+	// Indexes.
+	if dt != nil {
+		for _, f := range dt.DataFields() {
+			if f.SearchIndex {
+				idxCols := []string{f.Fieldname}
+				cols = append(cols, fmt.Sprintf("INDEX idx_%s (%s)", f.Fieldname, strings.Join(idxCols, ", ")))
+			}
+			if f.Unique {
+				cols = append(cols, fmt.Sprintf("UNIQUE KEY uq_%s (%s)", f.Fieldname, f.Fieldname))
+			}
+		}
+	}
+
+	// Child table indexes.
+	if isChild {
+		cols = append(cols, "INDEX idx_parent (parent)")
+	}
+
+	return fmt.Sprintf("CREATE TABLE %s (\n  %s\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+		sqlTableName, strings.Join(cols, ",\n  "))
+}
+
+func generateAddColumn(tableName string, col ColumnAdd) string {
+	nullable := ""
+	if !col.Nullable {
+		nullable = " NOT NULL"
+	}
+	if col.Default != "" {
+		if col.Nullable {
+			nullable = fmt.Sprintf(" DEFAULT '%s'", escapeSQL(col.Default))
+		} else {
+			nullable = fmt.Sprintf(" NOT NULL DEFAULT '%s'", escapeSQL(col.Default))
+		}
+	}
+	return fmt.Sprintf("ALTER TABLE `%s` ADD COLUMN %s %s%s", tableName, col.Name, col.Type, nullable)
+}
+
+func generateCreateIndex(tableName string, idx IndexAdd) string {
+	uniqueStr := ""
+	if idx.Unique {
+		uniqueStr = "UNIQUE "
+	}
+	colStr := strings.Join(idx.Columns, ", ")
+	return fmt.Sprintf("CREATE %sINDEX idx_%s ON `%s` (%s)", uniqueStr, strings.Join(idx.Columns, "_"), tableName, colStr)
+}
+
+func escapeSQL(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
+// ApplyDDL executes the DDL statements against the database.
+func ApplyDDL(db *sql.DB, statements []string) error {
+	for _, stmt := range statements {
+		slog.Debug("applying DDL", "sql", stmt)
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("executing DDL: %w\nSQL: %s", err, stmt)
+		}
+	}
+	return nil
+}
+
+// MigrateSite computes the schema diff for a site and applies it.
+func MigrateSite(db *sql.DB, dbName string, registry *doctype.Registry) error {
+	liveSchema, err := LoadLiveSchema(db, dbName)
+	if err != nil {
+		return fmt.Errorf("loading live schema: %w", err)
+	}
+
+	diff := ComputeDiff(registry, liveSchema)
+	if diff.IsEmpty() {
+		slog.Info("schema is up to date, no migrations needed")
+		return nil
+	}
+
+	slog.Info("schema diff computed",
+		"new_tables", len(diff.NewTables),
+		"new_columns", len(diff.NewColumns),
+		"new_indexes", len(diff.NewIndexes),
+		"orphaned_columns", len(diff.Orphaned),
+	)
+
+	ddl := diff.GenerateDDL(registry)
+	for _, stmt := range ddl {
+		slog.Info("DDL", "sql", stmt)
+	}
+
+	return ApplyDDL(db, ddl)
+}
