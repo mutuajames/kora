@@ -1,0 +1,71 @@
+name: Task
+module: Projects
+is_child_table: false
+title_field: task_name
+sort_field: order
+sort_order: ASC
+
+fields:
+  - fieldname: task_name
+    fieldtype: Data
+    label: Task Name
+    reqd: true
+    bold: true
+    in_list_view: true
+
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+
+  - fieldname: parent_task
+    fieldtype: Link
+    label: Parent Task
+    options: Task
+
+  - fieldname: assigned_to
+    fieldtype: Data
+    label: Assigned To
+
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Not Started
+      In Progress
+      Blocked
+      Done
+    default: Not Started
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: priority
+    fieldtype: Select
+    label: Priority
+    options: |
+      Low
+      Medium
+      High
+      Critical
+    default: Medium
+
+  - fieldname: sort_order
+    fieldtype: Int
+    label: Sort Order
+    default: "0"
+
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due Date
+
+  - fieldname: estimated_hours
+    fieldtype: Float
+    label: Est. Hours
+
+  - fieldname: actual_hours
+    fieldtype: Float
+    label: Actual Hours
+
+  - fieldname: progress_pct
+    fieldtype: Percent
+    label: Progress
+    default: "0"

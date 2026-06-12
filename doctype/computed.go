@@ -1,0 +1,264 @@
+package doctype
+
+import (
+	"fmt"
+	"log/slog"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
+)
+
+// computedCache holds compiled programs for computed field expressions.
+var computedCache = make(map[string]*vm.Program)
+
+// sumPattern matches SUM(field.column) — e.g., SUM(items.line_total).
+var sumPattern = regexp.MustCompile(`SUM\(\s*(\w+)\.(\w+)\s*\)`)
+
+// roundPattern matches ROUND(expr, N).
+var roundPattern = regexp.MustCompile(`ROUND\(\s*(.+?)\s*,\s*(\d+)\s*\)`)
+
+// countPattern matches COUNT(table_field) — e.g., COUNT(attendees).
+var countPattern = regexp.MustCompile(`COUNT\(\s*(\w+)\s*\)`)
+
+// datediffPattern matches DATEDIFF(a, b) — e.g., DATEDIFF(due_date, today()).
+var datediffPattern = regexp.MustCompile(`DATEDIFF\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)`)
+
+// cfInfo holds metadata about a computed field for dependency ordering.
+type cfInfo struct {
+	field        *Field
+	expr         string
+	hasSum       bool
+	hasRound     bool
+	hasCount     bool
+	hasDateDiff  bool
+}
+
+// ComputeFields evaluates all computed fields on a document and sets their values.
+func ComputeFields(dt *DocType, doc *Document) error {
+	if doc == nil || dt == nil {
+		return nil
+	}
+
+	var computed []cfInfo
+	for i := range dt.Fields {
+		f := &dt.Fields[i]
+		if f.Computed != "" && f.Fieldtype != "Table" {
+			cf := cfInfo{field: f, expr: f.Computed}
+			cf.hasSum = sumPattern.MatchString(f.Computed)
+			cf.hasRound = roundPattern.MatchString(f.Computed)
+			cf.hasCount = countPattern.MatchString(f.Computed)
+			cf.hasDateDiff = datediffPattern.MatchString(f.Computed)
+			computed = append(computed, cf)
+		}
+	}
+
+	if len(computed) == 0 {
+		return nil
+	}
+
+	// Evaluate in dependency order:
+	// 1. SUM/COUNT fields first (aggregate child data)
+	// 2. DATEDIFF/ROUND fields (depend on other fields)
+	// 3. Simple arithmetic fields last
+	passes := [][]cfInfo{
+		filterCF(computed, func(cf cfInfo) bool { return (cf.hasSum || cf.hasCount) && !cf.hasRound && !cf.hasDateDiff }),
+		filterCF(computed, func(cf cfInfo) bool { return cf.hasRound || cf.hasDateDiff }),
+		filterCF(computed, func(cf cfInfo) bool { return !cf.hasSum && !cf.hasCount && !cf.hasRound && !cf.hasDateDiff }),
+	}
+
+	for _, pass := range passes {
+		for _, cf := range pass {
+			val, err := evalComputed(cf.expr, dt, doc)
+			if err != nil {
+				slog.Warn("computed field evaluation failed", "field", cf.field.Fieldname, "expr", cf.expr, "error", err)
+				continue
+			}
+			doc.Set(cf.field.Fieldname, val)
+		}
+	}
+
+	return nil
+}
+
+func filterCF(items []cfInfo, fn func(cfInfo) bool) []cfInfo {
+	var result []cfInfo
+	for _, item := range items {
+		if fn(item) {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+// evalComputed evaluates a single computed field expression.
+func evalComputed(exprStr string, dt *DocType, doc *Document) (any, error) {
+	resolved := exprStr
+
+	// Step 1: Resolve COUNT() calls.
+	for _, m := range countPattern.FindAllStringSubmatch(exprStr, -1) {
+		tableField := strings.TrimSpace(m[1])
+		children := doc.GetTable(tableField)
+		resolved = strings.Replace(resolved, m[0], strconv.Itoa(len(children)), 1)
+	}
+
+	// Step 2: Resolve SUM() calls.
+	for _, m := range sumPattern.FindAllStringSubmatch(exprStr, -1) {
+		tableField := m[1]
+		column := m[2]
+		var sum float64
+		children := doc.GetTable(tableField)
+		for _, child := range children {
+			sum += asFloat64(child.Get(column))
+		}
+		resolved = strings.Replace(resolved, m[0], strconv.FormatFloat(sum, 'f', -1, 64), 1)
+	}
+
+	// Step 3: Resolve DATEDIFF() calls.
+	for _, m := range datediffPattern.FindAllStringSubmatch(resolved, -1) {
+		left := strings.TrimSpace(m[1])
+		right := strings.TrimSpace(m[2])
+		leftDate := resolveDate(left, doc)
+		rightDate := resolveDate(right, doc)
+		days := int(rightDate.Sub(leftDate).Hours() / 24)
+		resolved = strings.Replace(resolved, m[0], strconv.Itoa(days), 1)
+	}
+
+	// Step 4: Build evaluation environment.
+	env := make(map[string]any)
+	for k, v := range doc.Fields {
+		// Keep table fields as-is (for len()), convert others to float64.
+		if doc.GetTable(k) != nil {
+			env[k] = v
+		} else {
+			env[k] = asFloat64(v)
+		}
+	}
+	env["name"] = doc.Name
+	env["doc_status"] = float64(doc.DocStatus)
+
+	// Step 5: Handle ROUND().
+	for _, m := range roundPattern.FindAllStringSubmatch(resolved, -1) {
+		inner := strings.TrimSpace(m[1])
+		decimals, _ := strconv.Atoi(m[2])
+		innerResult, err := evalSimpleExpr(inner, env)
+		if err != nil {
+			return nil, fmt.Errorf("evaluating ROUND inner %q: %w", inner, err)
+		}
+		rounded := roundTo(asFloat64(innerResult), decimals)
+		resolved = strings.Replace(resolved, m[0], strconv.FormatFloat(rounded, 'f', -1, 64), 1)
+	}
+
+	// Step 6: Final evaluation.
+	result, err := evalSimpleExpr(resolved, env)
+	if err != nil {
+		return nil, fmt.Errorf("evaluating %q: %w", resolved, err)
+	}
+
+	return result, nil
+}
+
+// resolveDate resolves a date value: field name, today(), or string literal.
+func resolveDate(s string, doc *Document) time.Time {
+	s = strings.TrimSpace(s)
+
+	// today() function.
+	if s == "today()" {
+		now := time.Now()
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	}
+
+	// String literal: '2026-01-15' or "2026-01-15".
+	if (strings.HasPrefix(s, "'") && strings.HasSuffix(s, "'")) ||
+		(strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"")) {
+		s = s[1 : len(s)-1]
+	}
+
+	// Try parsing as date.
+	for _, layout := range []string{"2006-01-02", "2006-01-02T15:04:05Z", "2006-01-02T15:04:05"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+
+	// Field name: look up in document.
+	if val := doc.Get(s); val != nil {
+		switch v := val.(type) {
+		case string:
+			for _, layout := range []string{"2006-01-02", "2006-01-02T15:04:05Z", "2006-01-02T15:04:05"} {
+				if t, err := time.Parse(layout, v); err == nil {
+					return t
+				}
+			}
+		case time.Time:
+			return v
+		}
+		// Try float64 (JSON number as unix timestamp days).
+		return time.Time{}
+	}
+
+	return time.Time{}
+}
+
+// evalSimpleExpr compiles and evaluates a simple arithmetic expression.
+func evalSimpleExpr(exprStr string, env map[string]any) (any, error) {
+	program, err := compileForComputed(exprStr)
+	if err != nil {
+		return nil, err
+	}
+	return expr.Run(program, env)
+}
+
+// roundTo rounds a float to N decimal places.
+func roundTo(val float64, decimals int) float64 {
+	pow := 1.0
+	for i := 0; i < decimals; i++ {
+		pow *= 10
+	}
+	return float64(int(val*pow+0.5)) / pow
+}
+
+// compileForComputed compiles an expression for computed field evaluation.
+func compileForComputed(exprStr string) (*vm.Program, error) {
+	if cached, ok := computedCache[exprStr]; ok {
+		return cached, nil
+	}
+
+	program, err := expr.Compile(exprStr, expr.AsAny())
+	if err != nil {
+		return nil, err
+	}
+
+	computedCache[exprStr] = program
+	return program, nil
+}
+
+// asFloat64 converts any value to float64 for arithmetic.
+func asFloat64(v any) float64 {
+	if v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case string:
+		f, _ := strconv.ParseFloat(n, 64)
+		return f
+	case []byte:
+		f, _ := strconv.ParseFloat(string(n), 64)
+		return f
+	default:
+		s := fmt.Sprintf("%v", v)
+		f, _ := strconv.ParseFloat(s, 64)
+		return f
+	}
+}

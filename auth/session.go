@@ -2,7 +2,6 @@ package auth
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -236,7 +235,10 @@ func (sm *SessionManager) AuthenticateUser(email, password string) (*User, error
 	}
 
 	if !enabled {
-		return nil, fmt.Errorf("user account is disabled")
+		// Return generic "invalid credentials" to prevent user enumeration.
+		// The real reason is logged for audit purposes.
+		slog.Warn("login attempt for disabled account", "email", email)
+		return nil, fmt.Errorf("invalid credentials")
 	}
 
 	// Verify password.
@@ -324,10 +326,6 @@ func generateSessionID() string {
 	return hex.EncodeToString(b)
 }
 
-func init() {
-	_ = subtle.ConstantTimeCompare
-}
-
 // AuthMiddleware returns a Gin middleware that validates session cookies.
 func AuthMiddleware(sm *SessionManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -338,50 +336,60 @@ func AuthMiddleware(sm *SessionManager) gin.HandlerFunc {
 			return
 		}
 
-		// Get session cookie.
-		sid, err := c.Cookie("kora_sid")
-		if err != nil {
-			// Try Authorization header.
-			authHeader := c.GetHeader("Authorization")
-			if stringsHasPrefix(authHeader, "Bearer ") {
-				sid = authHeader[7:]
-			}
-		}
-
-		if sid == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
-			c.Abort()
+		if !validateSession(c, sm) {
 			return
-		}
-
-		// Use site-specific DB for session validation if available.
-		sessionSM := sm
-		if siteDB, exists := c.Get("site_db"); exists {
-			if sdb, ok := siteDB.(*sql.DB); ok && sdb != sm.DB {
-				sessionSM = NewSessionManager(sdb)
-			}
-		}
-
-		user, err := sessionSM.GetSession(sid)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired session"})
-			c.Abort()
-			return
-		}
-
-		c.Set("user", user.Name)
-		c.Set("user_obj", user)
-
-		// Set role info for permission checks.
-		if len(user.Roles) > 0 {
-			c.Set("user_role", user.Roles[0])
-			c.Set("user_roles", user.Roles)
-		} else {
-			c.Set("user_role", "")
-			c.Set("user_roles", []string{})
 		}
 		c.Next()
 	}
+}
+
+// validateSession validates the session cookie/header and sets user context.
+// Returns false and writes 401 if auth fails; true if auth succeeded or was skipped.
+// Does NOT call c.Next() — callers must do that themselves.
+func validateSession(c *gin.Context, sm *SessionManager) bool {
+	// Get session cookie.
+	sid, err := c.Cookie("kora_sid")
+	if err != nil {
+		// Try Authorization header.
+		authHeader := c.GetHeader("Authorization")
+		if stringsHasPrefix(authHeader, "Bearer ") {
+			sid = authHeader[7:]
+		}
+	}
+
+	if sid == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		c.Abort()
+		return false
+	}
+
+	// Use site-specific DB for session validation if available.
+	sessionSM := sm
+	if siteDB, exists := c.Get("site_db"); exists {
+		if sdb, ok := siteDB.(*sql.DB); ok && sdb != sm.DB {
+			sessionSM = NewSessionManager(sdb)
+		}
+	}
+
+	user, err := sessionSM.GetSession(sid)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired session"})
+		c.Abort()
+		return false
+	}
+
+	c.Set("user", user.Name)
+	c.Set("user_obj", user)
+
+	// Set role info for permission checks.
+	if len(user.Roles) > 0 {
+		c.Set("user_role", user.Roles[0])
+		c.Set("user_roles", user.Roles)
+	} else {
+		c.Set("user_role", "")
+		c.Set("user_roles", []string{})
+	}
+	return true
 }
 
 func stringsHasPrefix(s, prefix string) bool {
@@ -413,7 +421,13 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 
 			user, err := sm.AuthenticateUser(req.Email, req.Password)
 			if err != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+				// Only return known user-facing messages; log internal errors.
+				msg := err.Error()
+				if msg != "invalid credentials" {
+					slog.Error("login authentication error", "error", err)
+					msg = "invalid credentials"
+				}
+				c.JSON(http.StatusUnauthorized, gin.H{"error": msg})
 				return
 			}
 
@@ -423,8 +437,8 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 				return
 			}
 
-			// Set cookie.
-			c.SetCookie("kora_sid", sid, int(SessionLifetime.Seconds()), "/", "", false, true)
+			// Set cookie with Secure auto-detected from TLS and SameSite=Lax.
+			SetSecureCookie(c, "kora_sid", sid, int(SessionLifetime.Seconds()), "/", true)
 
 			c.JSON(http.StatusOK, gin.H{
 				"data": gin.H{
@@ -447,7 +461,7 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 				}
 				logoutSM.DeleteSession(sid)
 			}
-			c.SetCookie("kora_sid", "", -1, "/", "", false, true)
+			SetSecureCookie(c, "kora_sid", "", -1, "/", true)
 			c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 		})
 
@@ -474,7 +488,8 @@ func RegisterAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB) {
 			}
 			user, err := meSM.GetSession(sid)
 			if err != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+				slog.Warn("session validation failed for /me", "error", err)
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired session"})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{

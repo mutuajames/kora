@@ -5,6 +5,7 @@ package orm
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -41,6 +42,12 @@ func derivePrefix(name string) string {
 		}
 	}
 	return result.String()
+}
+
+// sqlExecutor abstracts *sql.DB and *sql.Tx for Exec and QueryRow calls.
+type sqlExecutor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
 }
 
 // TxManager provides transactional operations on documents.
@@ -127,16 +134,83 @@ func (tx *TxManager) Insert(dt *doctype.DocType, doc *doctype.Document, owner st
 		}
 	}
 
+	// Evaluate computed fields on child items (e.g., line_total = quantity * unit_price).
+	for _, f := range dt.TableFields() {
+		children := doc.GetTable(f.Fieldname)
+		if children == nil {
+			continue
+		}
+		childDT := tx.Registry.Get(f.Options)
+		if childDT == nil {
+			continue
+		}
+		for _, child := range children {
+			if err := doctype.ComputeFields(childDT, child); err != nil {
+				slog.Warn("computed fields failed on child", "doctype", childDT.Name, "error", err)
+			}
+		}
+	}
+
+	// Evaluate computed fields on the parent document (e.g., subtotal = SUM(items.line_total)).
+	if err := doctype.ComputeFields(dt, doc); err != nil {
+		slog.Warn("computed fields failed", "doctype", dt.Name, "error", err)
+	}
+
+	// Persist computed field values via UPDATE.
+	if err := tx.updateComputedFields(dt, doc); err != nil {
+		return fmt.Errorf("persisting computed fields: %w", err)
+	}
+
 	doc.IsNew = false
 	return nil
 }
 
+// updateComputedFields UPDATEs only computed field columns on the document.
+func (tx *TxManager) updateComputedFields(dt *doctype.DocType, doc *doctype.Document) error {
+	return updateComputedFieldsExec(tx.DB, dt, doc)
+}
+
+// updateComputedFieldsExec UPDATEs computed fields using the given executor (DB or Tx).
+func updateComputedFieldsExec(ex sqlExecutor, dt *doctype.DocType, doc *doctype.Document) error {
+	var setClauses []string
+	var values []any
+
+	for _, f := range dt.Fields {
+		if f.Computed == "" || f.Fieldtype == "Table" {
+			continue
+		}
+		val := doc.Get(f.Fieldname)
+		if val != nil {
+			setClauses = append(setClauses, fmt.Sprintf("%s = ?", f.Fieldname))
+			values = append(values, val)
+		}
+	}
+
+	if len(setClauses) == 0 {
+		return nil
+	}
+
+	values = append(values, doc.Name)
+	query := fmt.Sprintf("UPDATE %s SET %s WHERE name = ?",
+		dt.TableName(),
+		strings.Join(setClauses, ", "),
+	)
+
+	_, err := ex.Exec(query, values...)
+	return err
+}
+
 func (tx *TxManager) insertChild(parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, doc *doctype.Document, parentName string, idx int) error {
+	return insertChildExec(tx.DB, parentDT, parentField, childDT, doc, parentName, idx)
+}
+
+// insertChildExec inserts a child row using the given executor (DB or Tx).
+func insertChildExec(ex sqlExecutor, parentDT *doctype.DocType, parentField string, childDT *doctype.DocType, doc *doctype.Document, parentName string, idx int) error {
 	if doc.Name == "" {
 		// Generate unique child row name including parent reference.
 		var count int
 		prefix := derivePrefix(childDT.Name)
-		tx.DB.QueryRow(
+		ex.QueryRow(
 			fmt.Sprintf("SELECT COUNT(*) FROM %s", parentDT.ChildTableName(parentField)),
 		).Scan(&count)
 		doc.Name = fmt.Sprintf("%s-%s-%04d", prefix, parentName, count+1)
@@ -169,19 +243,29 @@ func (tx *TxManager) insertChild(parentDT *doctype.DocType, parentField string, 
 		values = append(values, val)
 	}
 
+	// Build SET clause for ON DUPLICATE KEY UPDATE (update all non-key columns).
+	var updateClauses []string
+	for _, col := range columns {
+		if col != "name" {
+			updateClauses = append(updateClauses, fmt.Sprintf("%s = VALUES(%s)", col, col))
+		}
+	}
+
 	query := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s)",
+		"INSERT INTO %s (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
 		parentDT.ChildTableName(parentField),
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "),
+		strings.Join(updateClauses, ", "),
 	)
 
-	_, err := tx.DB.Exec(query, values...)
+	_, err := ex.Exec(query, values...)
 	return err
 }
 
 // Save updates an existing document.
 // If owner is non-empty, only updates if the document is owned by that user.
+// All operations run in a database transaction to ensure atomicity.
 func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy string, owner string) error {
 	if doc.IsNew {
 		return fmt.Errorf("cannot save a new document; use Insert instead")
@@ -191,6 +275,13 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 	if err := tx.checkUniqueConstraints(dt, doc, doc.Name); err != nil {
 		return err
 	}
+
+	// Start a transaction so DELETE + INSERT for child tables is atomic.
+	dbTx, err := tx.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer dbTx.Rollback() // no-op after Commit
 
 	now := time.Now()
 	dataFields := dt.DataFields()
@@ -202,15 +293,15 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 		if f.Fieldtype == "Table" {
 			continue
 		}
-		if f.ReadOnly {
-			continue
-		}
+		// Note: read_only is a UI hint, not an ORM constraint.
+		// The workflow handler needs to persist state changes to read_only fields.
+		// Direct edits are blocked at the API level (HandleUpdate).
 		setClauses = append(setClauses, fmt.Sprintf("%s = ?", f.Fieldname))
 		values = append(values, doc.Get(f.Fieldname))
 	}
 
-	setClauses = append(setClauses, "modified = ?", "modified_by = ?")
-	values = append(values, now, modifiedBy)
+	setClauses = append(setClauses, "modified = ?", "modified_by = ?", "doc_status = ?")
+	values = append(values, now, modifiedBy, doc.DocStatus)
 
 	where := "name = ?"
 	values = append(values, doc.Name)
@@ -226,7 +317,7 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 		where,
 	)
 
-	result, err := tx.DB.Exec(query, values...)
+	result, err := dbTx.Exec(query, values...)
 	if err != nil {
 		return fmt.Errorf("updating document: %w", err)
 	}
@@ -238,7 +329,7 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 
 	for _, f := range dt.TableFields() {
 		childTableName := dt.ChildTableName(f.Fieldname)
-		if _, err := tx.DB.Exec(
+		if _, err := dbTx.Exec(
 			fmt.Sprintf("DELETE FROM %s WHERE parent = ?", childTableName),
 			doc.Name,
 		); err != nil {
@@ -256,10 +347,39 @@ func (tx *TxManager) Save(dt *doctype.DocType, doc *doctype.Document, modifiedBy
 
 		for i, child := range children {
 			child.DocType = childDT.Name
-			if err := tx.insertChild(dt, f.Fieldname, childDT, child, doc.Name, i); err != nil {
+			if err := insertChildExec(dbTx, dt, f.Fieldname, childDT, child, doc.Name, i); err != nil {
 				return fmt.Errorf("inserting child row %d in %s: %w", i, f.Fieldname, err)
 			}
 		}
+	}
+
+	// Evaluate computed fields on child items first, then parent.
+	for _, f := range dt.TableFields() {
+		children := doc.GetTable(f.Fieldname)
+		if children == nil {
+			continue
+		}
+		childDT := tx.Registry.Get(f.Options)
+		if childDT == nil {
+			continue
+		}
+		for _, child := range children {
+			if err := doctype.ComputeFields(childDT, child); err != nil {
+				slog.Warn("computed fields failed on child", "doctype", childDT.Name, "error", err)
+			}
+		}
+	}
+
+	if err := doctype.ComputeFields(dt, doc); err != nil {
+		slog.Warn("computed fields failed", "doctype", dt.Name, "error", err)
+	}
+
+	if err := updateComputedFieldsExec(dbTx, dt, doc); err != nil {
+		return fmt.Errorf("persisting computed fields: %w", err)
+	}
+
+	if err := dbTx.Commit(); err != nil {
+		return fmt.Errorf("committing transaction: %w", err)
 	}
 
 	return nil
@@ -401,6 +521,10 @@ func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string
 		if err != nil {
 			return nil, 0, fmt.Errorf("parsing filters: %w", err)
 		}
+		// Validate filter field names against the DocType's actual fields.
+		if err := fs.ValidateFields(dt); err != nil {
+			return nil, 0, fmt.Errorf("invalid filter: %w", err)
+		}
 		where, whereArgs, err = fs.ToSQL()
 		if err != nil {
 			return nil, 0, fmt.Errorf("building filter SQL: %w", err)
@@ -432,12 +556,18 @@ func (tx *TxManager) GetList(dt *doctype.DocType, filters string, orderBy string
 		orderBy = dt.SortField + " " + dt.SortOrder
 	}
 
+	// Validate orderBy against known columns to prevent SQL injection.
+	safeOrderBy, err := validateOrderBy(orderBy, dt)
+	if err != nil {
+		return nil, 0, fmt.Errorf("invalid order_by: %w", err)
+	}
+
 	query := fmt.Sprintf(
 		"SELECT %s FROM %s WHERE %s ORDER BY %s LIMIT ? OFFSET ?",
 		strings.Join(cols, ", "),
 		dt.TableName(),
 		where,
-		orderBy,
+		safeOrderBy,
 	)
 
 	args := append(whereArgs, limit, offset)
@@ -517,6 +647,73 @@ func (tx *TxManager) Delete(dt *doctype.DocType, name string, owner string) erro
 	return nil
 }
 
+// validSortColumns returns the set of column names that can be used in ORDER BY clauses.
+// These are the DocType's data fields plus system columns.
+func validSortColumns(dt *doctype.DocType) map[string]bool {
+	cols := map[string]bool{
+		"name":        true,
+		"owner":       true,
+		"creation":    true,
+		"modified":    true,
+		"modified_by": true,
+		"doc_status":  true,
+		"idx":         true,
+	}
+	for _, f := range dt.DataFields() {
+		if f.Fieldtype != "Table" {
+			cols[f.Fieldname] = true
+		}
+	}
+	return cols
+}
+
+// validateOrderBy parses and validates an ORDER BY clause against known columns.
+// It returns a safe, backtick-quoted ORDER BY string suitable for SQL interpolation.
+// This prevents SQL injection via the order_by query parameter.
+func validateOrderBy(orderBy string, dt *doctype.DocType) (string, error) {
+	if orderBy == "" {
+		return "", fmt.Errorf("order_by must not be empty")
+	}
+
+	validCols := validSortColumns(dt)
+	parts := strings.Split(orderBy, ",")
+	var safeParts []string
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		// Split into field name and optional direction.
+		segments := strings.Fields(part)
+		if len(segments) == 0 || len(segments) > 2 {
+			return "", fmt.Errorf("invalid ORDER BY clause: %q", part)
+		}
+
+		col := segments[0]
+		dir := "ASC"
+		if len(segments) == 2 {
+			dir = strings.ToUpper(segments[1])
+			if dir != "ASC" && dir != "DESC" {
+				return "", fmt.Errorf("invalid sort direction %q in ORDER BY; must be ASC or DESC", segments[1])
+			}
+		}
+
+		if !validCols[col] {
+			return "", fmt.Errorf("unknown column %q in ORDER BY", col)
+		}
+
+		safeParts = append(safeParts, fmt.Sprintf("`%s` %s", col, dir))
+	}
+
+	if len(safeParts) == 0 {
+		return "", fmt.Errorf("no valid columns in ORDER BY")
+	}
+
+	return strings.Join(safeParts, ", "), nil
+}
+
 // checkUniqueConstraints verifies that unique fields don't conflict with existing documents.
 // Returns a doctype.ValidationError if a duplicate is found, so the frontend can show a field-level error.
 func (tx *TxManager) checkUniqueConstraints(dt *doctype.DocType, doc *doctype.Document, excludeName string) error {
@@ -529,8 +726,8 @@ func (tx *TxManager) checkUniqueConstraints(dt *doctype.DocType, doc *doctype.Do
 			continue // nil/empty values don't trigger unique checks.
 		}
 
-		// SELECT name FROM tabX WHERE fieldname = ? AND name != ?
-		query := fmt.Sprintf("SELECT name FROM %s WHERE %s = ?", dt.TableName(), f.Fieldname)
+		// SELECT name FROM tabX WHERE `fieldname` = ? AND name != ?
+		query := fmt.Sprintf("SELECT name FROM %s WHERE `%s` = ?", dt.TableName(), f.Fieldname)
 		args := []any{val}
 		if excludeName != "" {
 			query += " AND name != ?"

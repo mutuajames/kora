@@ -1,0 +1,64 @@
+name: Product
+module: Inventory
+title_field: product_name
+search_fields: product_name, sku
+sort_field: product_name
+sort_order: ASC
+
+fields:
+  - fieldname: product_name
+    fieldtype: Data
+    label: Product Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: sku
+    fieldtype: Data
+    label: SKU
+    unique: true
+    in_list_view: true
+
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Raw Materials
+      Finished Goods
+      Packaging
+      Supplies
+    in_standard_filter: true
+
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit Price
+    constraints:
+      - type: min
+        value: 0
+        message: "Price cannot be negative."
+
+  - fieldname: stock_qty
+    fieldtype: Float
+    label: Stock Quantity
+    computed: "SUM(stock_moves.qty_change)"
+    read_only: true
+    in_list_view: true
+
+  - fieldname: reorder_level
+    fieldtype: Int
+    label: Reorder Level
+    default: "10"
+
+  - fieldname: warehouse
+    fieldtype: Select
+    label: Warehouse
+    options: |
+      Main Warehouse
+      East Distribution
+      West Distribution
+
+  - fieldname: stock_moves
+    fieldtype: Table
+    label: Stock Movements
+    options: Stock Move

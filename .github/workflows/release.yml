@@ -17,21 +17,117 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Build UI
+        run: |
+          cd ui
+          bun install --frozen-lockfile
+          bun run build
+          cd ..
+          rm -rf workspace/dist
+          cp -r ui/dist workspace/dist
+
+      - name: Build binaries
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+
+          # Inject version
+          echo "$VERSION" > VERSION
+
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/kora-linux-amd64 .
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/kora-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/kora-darwin-arm64 .
+
+          cd dist
+          sha256sum kora-linux-amd64 > kora-linux-amd64.sha256
+          sha256sum kora-darwin-amd64 > kora-darwin-amd64.sha256
+          sha256sum kora-darwin-arm64 > kora-darwin-arm64.sha256
+
       - name: Generate changelog
         id: changelog
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
           if [ -z "$PREV_TAG" ]; then
-            echo "body=Initial release." >> "$GITHUB_OUTPUT"
+            COMMITS=$(git log --oneline --no-merges HEAD)
           else
-            echo "body<<EOF" >> "$GITHUB_OUTPUT"
-            git log --oneline --no-merges "$PREV_TAG..HEAD" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
+            COMMITS=$(git log --oneline --no-merges "$PREV_TAG..HEAD")
           fi
+
+          FEATURES=$(echo "$COMMITS" | grep -iE '^[a-f0-9]+ (feat|add|implement|support|create|build)' || echo "")
+          FIXES=$(echo "$COMMITS" | grep -iE '^[a-f0-9]+ (fix|resolve|patch|correct|repair)' || echo "")
+          SECURITY=$(echo "$COMMITS" | grep -iE '^[a-f0-9]+ (security|auth|csrf|cors|vuln|protect|harden)' || echo "")
+          REFACTOR=$(echo "$COMMITS" | grep -iE '^[a-f0-9]+ (refactor|clean|improve|optimize|simplify)' || echo "")
+          DOCS=$(echo "$COMMITS" | grep -iE '^[a-f0-9]+ (docs|document|readme|guide)' || echo "")
+
+          {
+            if [ -n "$FEATURES" ]; then
+              echo "## 🚀 Features"
+              echo "$FEATURES" | sed 's/^[a-f0-9]\{7,\} /- /'
+              echo ""
+            fi
+            if [ -n "$FIXES" ]; then
+              echo "## 🐛 Fixes"
+              echo "$FIXES" | sed 's/^[a-f0-9]\{7,\} /- /'
+              echo ""
+            fi
+            if [ -n "$SECURITY" ]; then
+              echo "## 🔒 Security"
+              echo "$SECURITY" | sed 's/^[a-f0-9]\{7,\} /- /'
+              echo ""
+            fi
+            if [ -n "$REFACTOR" ]; then
+              echo "## 🔧 Improvements"
+              echo "$REFACTOR" | sed 's/^[a-f0-9]\{7,\} /- /'
+              echo ""
+            fi
+            if [ -n "$DOCS" ]; then
+              echo "## 📚 Documentation"
+              echo "$DOCS" | sed 's/^[a-f0-9]\{7,\} /- /'
+              echo ""
+            fi
+
+            echo "---"
+            echo "### 📦 Downloads"
+            echo "| Platform | Binary | Checksum |"
+            echo "|----------|--------|----------|"
+            echo "| Linux (amd64) | [kora-linux-amd64](https://github.com/\${{ github.repository }}/releases/download/\${{ github.ref_name }}/kora-linux-amd64) | [sha256](https://github.com/\${{ github.repository }}/releases/download/\${{ github.ref_name }}/kora-linux-amd64.sha256) |"
+            echo "| macOS (amd64) | [kora-darwin-amd64](https://github.com/\${{ github.repository }}/releases/download/\${{ github.ref_name }}/kora-darwin-amd64) | [sha256](https://github.com/\${{ github.repository }}/releases/download/\${{ github.ref_name }}/kora-darwin-amd64.sha256) |"
+            echo "| macOS (arm64) | [kora-darwin-arm64](https://github.com/\${{ github.repository }}/releases/download/\${{ github.ref_name }}/kora-darwin-arm64) | [sha256](https://github.com/\${{ github.repository }}/releases/download/\${{ github.ref_name }}/kora-darwin-arm64.sha256) |"
+
+            if [ -z "$PREV_TAG" ]; then
+              echo ""
+              echo "**Initial release**"
+            else
+              echo ""
+              echo "**Full diff:** [${PREV_TAG}...\${{ github.ref_name }}](https://github.com/\${{ github.repository }}/compare/${PREV_TAG}...\${{ github.ref_name }})"
+            fi
+          } > /tmp/release_body.md
+
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          cat /tmp/release_body.md >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           body: ${{ steps.changelog.outputs.body }}
+          files: |
+            dist/kora-linux-amd64
+            dist/kora-linux-amd64.sha256
+            dist/kora-darwin-amd64
+            dist/kora-darwin-amd64.sha256
+            dist/kora-darwin-arm64
+            dist/kora-darwin-arm64.sha256
           generate_release_notes: true

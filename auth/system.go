@@ -1,15 +1,33 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
+
+// consoleSessionLifetime is how long a console session lasts.
+const consoleSessionLifetime = 24 * time.Hour
+
+// consoleSessionCleanupInterval is how often expired sessions are purged.
+const consoleSessionCleanupInterval = 10 * time.Minute
+
+// ConsoleSession represents an authenticated console session stored server-side.
+type ConsoleSession struct {
+	Email     string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
 
 // SystemCredentials holds the system admin credential loaded from YAML.
 type SystemCredentials struct {
@@ -23,6 +41,10 @@ type SystemCredentials struct {
 type SystemGuard struct {
 	email        string
 	passwordHash string // bcrypt hash, computed on startup
+
+	// In-memory session store for console sessions.
+	mu       sync.RWMutex
+	sessions map[string]*ConsoleSession
 }
 
 // LoadSystemGuard reads system_credentials.yaml, hashes the password, and returns a guard.
@@ -41,61 +63,159 @@ func LoadSystemGuard(path string) (*SystemGuard, error) {
 		return nil, fmt.Errorf("system_credentials.yaml must have system_admin.email and system_admin.password")
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(creds.SystemAdmin.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(creds.SystemAdmin.Password), bcrypt.DefaultCost+2) // cost 12 for admin
 	if err != nil {
 		return nil, fmt.Errorf("hashing system password: %w", err)
 	}
 
-	slog.Info("system guard loaded", "email", creds.SystemAdmin.Email)
-	return &SystemGuard{
+	guard := &SystemGuard{
 		email:        creds.SystemAdmin.Email,
 		passwordHash: string(hash),
-	}, nil
+		sessions:     make(map[string]*ConsoleSession),
+	}
+
+	// Start background cleanup of expired sessions.
+	go guard.cleanupLoop()
+
+	slog.Info("system guard loaded", "email", creds.SystemAdmin.Email)
+	return guard, nil
+}
+
+// CreateSession creates a new console session for the given email.
+// Returns a cryptographically random session ID.
+func (g *SystemGuard) CreateSession(email string) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	sid := generateConsoleSessionID()
+	now := time.Now()
+	g.sessions[sid] = &ConsoleSession{
+		Email:     email,
+		CreatedAt: now,
+		ExpiresAt: now.Add(consoleSessionLifetime),
+	}
+	return sid
+}
+
+// ValidateSession checks whether a session ID is valid and returns the associated email.
+// Returns empty string if the session is invalid or expired.
+func (g *SystemGuard) ValidateSession(sid string) string {
+	g.mu.RLock()
+	session, ok := g.sessions[sid]
+	g.mu.RUnlock()
+
+	if !ok {
+		return ""
+	}
+
+	if time.Now().After(session.ExpiresAt) {
+		g.DeleteSession(sid)
+		return ""
+	}
+
+	return session.Email
+}
+
+// DeleteSession removes a console session.
+func (g *SystemGuard) DeleteSession(sid string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.sessions, sid)
+}
+
+// cleanupLoop periodically removes expired sessions.
+func (g *SystemGuard) cleanupLoop() {
+	ticker := time.NewTicker(consoleSessionCleanupInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		g.cleanupExpired()
+	}
+}
+
+func (g *SystemGuard) cleanupExpired() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	now := time.Now()
+	for sid, session := range g.sessions {
+		if now.After(session.ExpiresAt) {
+			delete(g.sessions, sid)
+		}
+	}
 }
 
 // Middleware returns a Gin middleware that enforces system admin authentication.
+// It accepts two authentication methods:
+//  1. Cookie: "kora_console_sid" with a server-validated session ID.
+//  2. Authorization header: "Basic <base64(email:password)>" for API clients.
 func (g *SystemGuard) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Skip login page.
+		// Skip login page and POST.
 		if c.Request.URL.Path == "/console/login" {
 			c.Next()
 			return
 		}
 
-		// Check Authorization header.
-		authHeader := c.GetHeader("Authorization")
-		if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
-			token := authHeader[7:]
-			// Token format: base64(email:password)
-			// In production, this would use a proper token/session system.
-			// For now, verify against stored credentials.
-			email, password, ok := parseBasicAuth(token)
-			if !ok {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid system credentials"})
-				return
-			}
-			if email != g.email || bcrypt.CompareHashAndPassword([]byte(g.passwordHash), []byte(password)) != nil {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid system credentials"})
-				return
-			}
+		// 1. Check Authorization header (API clients).
+		email, ok := g.checkAuthHeader(c)
+		if ok {
 			c.Set("is_system_admin", true)
 			c.Set("system_email", email)
 			c.Next()
 			return
 		}
 
-		// Check session cookie.
-		sid, _ := c.Cookie("kora_console_sid")
-		if sid != "" {
-			// System sessions are stored in memory for now.
-			// In production, use a dedicated session store.
-			c.Set("is_system_admin", true)
-			c.Next()
-			return
+		// 2. Check session cookie (browser).
+		sid, err := c.Cookie("kora_console_sid")
+		if err == nil && sid != "" {
+			email := g.ValidateSession(sid)
+			if email != "" {
+				c.Set("is_system_admin", true)
+				c.Set("system_email", email)
+				c.Next()
+				return
+			}
+			// Session invalid — clear the cookie.
+			SetSecureCookie(c, "kora_console_sid", "", -1, "/", true)
 		}
 
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "system authentication required"})
 	}
+}
+
+// checkAuthHeader validates the Authorization header.
+// Supports:
+//   - "Basic <base64(email:password)>" — HTTP Basic auth (RFC 7617)
+//   - "Bearer <console_session_id>" — console session token
+func (g *SystemGuard) checkAuthHeader(c *gin.Context) (string, bool) {
+	authHeader := c.GetHeader("Authorization")
+
+	// Basic auth (base64-encoded email:password).
+	if len(authHeader) > 6 && authHeader[:6] == "Basic " {
+		encoded := authHeader[6:]
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", false
+		}
+		email, password, ok := parseBasicAuth(string(decoded))
+		if !ok {
+			return "", false
+		}
+		if email == g.email && bcrypt.CompareHashAndPassword([]byte(g.passwordHash), []byte(password)) == nil {
+			return email, true
+		}
+		return "", false
+	}
+
+	// Bearer token — must be a valid console session ID.
+	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		token := authHeader[7:]
+		if email := g.ValidateSession(token); email != "" {
+			return email, true
+		}
+	}
+
+	return "", false
 }
 
 // VerifyCredentials checks if the given email and password match the system credentials.
@@ -106,13 +226,19 @@ func (g *SystemGuard) VerifyCredentials(email, password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(g.passwordHash), []byte(password))
 }
 
+// parseBasicAuth splits a string of the form "email:password" into its parts.
 func parseBasicAuth(token string) (string, string, bool) {
-	// Simple token format: email:password (base64-like, but we use plaintext for dev)
-	// In production, this uses proper token validation.
 	for i := 0; i < len(token); i++ {
 		if token[i] == ':' {
 			return token[:i], token[i+1:], true
 		}
 	}
 	return "", "", false
+}
+
+// generateConsoleSessionID returns a cryptographically random 64-character hex string.
+func generateConsoleSessionID() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }

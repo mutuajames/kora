@@ -1,0 +1,27 @@
+- doctype: Invoice
+  role: Billing Clerk
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: true
+- doctype: Invoice
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+- doctype: Invoice Item
+  role: Billing Clerk
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Invoice Item
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true

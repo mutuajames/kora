@@ -2,6 +2,7 @@ package cli
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -220,21 +221,21 @@ func createConfigVersion(db *sql.DB, siteName, createdBy, label string, doctypes
 	// Deactivate all previous versions.
 	db.Exec("UPDATE _kora_config_version SET is_active = 0 WHERE site = ?", siteName)
 
-	// Serialize config snapshot.
-	configJSON, _ := yaml.Marshal(doctypes)
+	// Serialize config snapshot as JSON (config column is JSON type).
+	configJSON, _ := json.Marshal(doctypes)
 
 	// Compute diff against previous version if one exists.
 	var prevConfigJSON string
 	db.QueryRow("SELECT config FROM _kora_config_version WHERE site = ? AND version = ?", siteName, currentVersion).Scan(&prevConfigJSON)
 
-	var changelog string
+	var changelog any // nil when empty, string when populated (MySQL JSON column rejects "")
 	if prevConfigJSON != "" {
 		var prevDoctypes []*doctype.DocType
-		if err := yaml.Unmarshal([]byte(prevConfigJSON), &prevDoctypes); err == nil {
+		if err := json.Unmarshal([]byte(prevConfigJSON), &prevDoctypes); err == nil {
 			diff := doctype.DiffConfigs(prevDoctypes, doctypes)
 			diff.FromVersion = currentVersion
 			diff.ToVersion = newVersion
-			changelogBytes, _ := yaml.Marshal(diff)
+			changelogBytes, _ := json.Marshal(diff)
 			changelog = string(changelogBytes)
 
 			if diff.IsBreaking {

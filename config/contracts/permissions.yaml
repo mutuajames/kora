@@ -1,0 +1,26 @@
+- doctype: Contract
+  role: Contract Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+- doctype: Contract
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+- doctype: Obligation
+  role: Contract Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Obligation
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true

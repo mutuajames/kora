@@ -1,0 +1,67 @@
+name: Project
+module: Projects
+title_field: project_name
+search_fields: project_name, description
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: project_name
+    fieldtype: Data
+    label: Project Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Planning
+      Active
+      On Hold
+      Completed
+      Cancelled
+    default: Planning
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start Date
+
+  - fieldname: end_date
+    fieldtype: Date
+    label: End Date
+
+  - fieldname: budget
+    fieldtype: Currency
+    label: Budget
+
+  - fieldname: completion_pct
+    fieldtype: Percent
+    label: Completion %
+    computed: "ROUND(task_progress / MAX(task_count, 1) * 100, 1)"
+    read_only: true
+
+  - fieldname: task_count
+    fieldtype: Int
+    label: Task Count
+    computed: "COUNT(tasks)"
+    read_only: true
+
+  - fieldname: task_progress
+    fieldtype: Float
+    label: Tasks Done
+    computed: "SUM(tasks.progress_pct)"
+    read_only: true
+
+  - fieldname: tasks
+    fieldtype: Table
+    label: Tasks
+    options: Task

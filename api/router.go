@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
@@ -65,6 +69,15 @@ var APIMaxLimit = 500
 func SetAPILimits(def, max int) {
 	if def > 0 { APIDefaultLimit = def }
 	if max > 0 { APIMaxLimit = max }
+}
+
+// internalError logs the real error server-side and returns a generic 500 response.
+// This prevents sensitive DB/internal details from leaking to API clients.
+func internalError(c *gin.Context, msg string, err error) {
+	slog.Error(msg, "error", err)
+	c.JSON(http.StatusInternalServerError, ErrorResponse{
+		Error: map[string]string{"message": "An internal error occurred"},
+	})
 }
 
 // Meta holds response metadata.
@@ -147,8 +160,9 @@ func (h *Handler) HandleList(c *gin.Context) {
 	var requestedFields []string
 	if fieldsParam != "" {
 		if err := json.Unmarshal([]byte(fieldsParam), &requestedFields); err != nil {
+			slog.Warn("invalid fields parameter", "error", err)
 			c.JSON(http.StatusBadRequest, ErrorResponse{
-				Error: map[string]string{"message": "Invalid fields parameter: " + err.Error()},
+				Error: map[string]string{"message": "Invalid fields parameter"},
 			})
 			return
 		}
@@ -156,17 +170,14 @@ func (h *Handler) HandleList(c *gin.Context) {
 
 	docs, total, err := h.siteTx(c).GetList(dt, filters, orderBy, limit, offset, owner)
 	if err != nil {
-		slog.Error("list query failed", "doctype", doctypeName, "error", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
-		})
+		internalError(c, "list query failed", err)
 		return
 	}
 
 	// Filter fields if requested.
 	var result []map[string]any
 	for _, doc := range docs {
-		item := docToMap(doc, dt, requestedFields)
+		item := docToMap(doc, dt, h.siteRegistry(c),requestedFields)
 		result = append(result, item)
 	}
 
@@ -206,14 +217,15 @@ func (h *Handler) HandleGet(c *gin.Context) {
 
 	doc, err := h.siteTx(c).GetDoc(dt, name, owner)
 	if err != nil {
+		slog.Warn("document get failed", "doctype", doctypeName, "name", name, "error", err)
 		c.JSON(http.StatusNotFound, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
+			Error: map[string]string{"message": "Document not found"},
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, Response{
-		Data: docToMap(doc, dt, nil),
+		Data: docToMap(doc, dt, h.siteRegistry(c),nil),
 		Meta: &Meta{DocType: doctypeName},
 	})
 }
@@ -238,8 +250,9 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 	// Parse request body.
 	var rawData map[string]any
 	if err := c.ShouldBindJSON(&rawData); err != nil {
+		slog.Warn("invalid JSON in create", "error", err)
 		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{"message": "Invalid JSON: " + err.Error()},
+			Error: map[string]string{"message": "Invalid request format"},
 		})
 		return
 	}
@@ -250,7 +263,7 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 		field := dt.GetField(key)
 		if field != nil && field.Fieldtype == "Table" {
 			// Parse child table rows.
-			children, err := parseChildRows(val, field, h.Registry)
+			children, err := parseChildRows(val, field, h.siteRegistry(c))
 			if err != nil {
 				c.JSON(http.StatusBadRequest, ErrorResponse{
 					Error: map[string]string{"message": fmt.Sprintf("Field %s: %s", key, err.Error())},
@@ -296,15 +309,12 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 			})
 			return
 		}
-		slog.Error("insert failed", "doctype", doctypeName, "error", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
-		})
+		internalError(c, "insert failed", err)
 		return
 	}
 
 	c.JSON(http.StatusCreated, Response{
-		Data: docToMap(doc, dt, nil),
+		Data: docToMap(doc, dt, h.siteRegistry(c),nil),
 		Meta: &Meta{DocType: doctypeName},
 	})
 }
@@ -337,8 +347,9 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 	// Load existing document.
 	oldDoc, err := h.siteTx(c).GetDoc(dt, name, owner)
 	if err != nil {
+		slog.Warn("document get failed for update", "doctype", doctypeName, "name", name, "error", err)
 		c.JSON(http.StatusNotFound, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
+			Error: map[string]string{"message": "Document not found"},
 		})
 		return
 	}
@@ -346,8 +357,9 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 	// Parse request body.
 	var rawData map[string]any
 	if err := c.ShouldBindJSON(&rawData); err != nil {
+		slog.Warn("invalid JSON in update", "error", err)
 		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{"message": "Invalid JSON: " + err.Error()},
+			Error: map[string]string{"message": "Invalid request format"},
 		})
 		return
 	}
@@ -369,7 +381,7 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 	for key, val := range rawData {
 		field := dt.GetField(key)
 		if field != nil && field.Fieldtype == "Table" {
-			children, err := parseChildRows(val, field, h.Registry)
+			children, err := parseChildRows(val, field, h.siteRegistry(c))
 			if err != nil {
 				c.JSON(http.StatusBadRequest, ErrorResponse{
 					Error: map[string]string{"message": fmt.Sprintf("Field %s: %s", key, err.Error())},
@@ -408,15 +420,12 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 			})
 			return
 		}
-		slog.Error("save failed", "doctype", doctypeName, "name", name, "error", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
-		})
+		internalError(c, "save failed", err)
 		return
 	}
 
 	c.JSON(http.StatusOK, Response{
-		Data: docToMap(doc, dt, nil),
+		Data: docToMap(doc, dt, h.siteRegistry(c),nil),
 		Meta: &Meta{DocType: doctypeName},
 	})
 }
@@ -447,8 +456,9 @@ func (h *Handler) HandleDelete(c *gin.Context) {
 	}
 
 	if err := h.siteTx(c).Delete(dt, name, owner); err != nil {
+		slog.Warn("document delete failed", "doctype", doctypeName, "name", name, "error", err)
 		c.JSON(http.StatusNotFound, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
+			Error: map[string]string{"message": "Document not found"},
 		})
 		return
 	}
@@ -462,7 +472,7 @@ func (h *Handler) HandleDelete(c *gin.Context) {
 // --- Helpers ---
 
 // docToMap converts a Document to a map for JSON serialization, including system fields.
-func docToMap(doc *doctype.Document, dt *doctype.DocType, requestedFields []string) map[string]any {
+func docToMap(doc *doctype.Document, dt *doctype.DocType, registry *doctype.Registry, requestedFields []string) map[string]any {
 	result := make(map[string]any)
 	result["name"] = doc.Name
 	result["doc_status"] = doc.DocStatus
@@ -471,10 +481,10 @@ func docToMap(doc *doctype.Document, dt *doctype.DocType, requestedFields []stri
 		if f.Fieldtype == "Table" {
 			children := doc.GetTable(f.Fieldname)
 			if children != nil {
-				childDT := dtRegistryLookup(dt, f.Fieldname) // Simplified — look up later.
+				childDT := dtRegistryLookup(registry, dt, f.Fieldname)
 				var childMaps []map[string]any
 				for _, child := range children {
-					childMaps = append(childMaps, docToMap(child, childDT, nil))
+					childMaps = append(childMaps, docToMap(child, childDT, registry, nil))
 				}
 				result[f.Fieldname] = childMaps
 			} else {
@@ -500,10 +510,14 @@ func docToMap(doc *doctype.Document, dt *doctype.DocType, requestedFields []stri
 	return result
 }
 
-// dtRegistryLookup is a stub — in full implementation, this uses the registry.
-func dtRegistryLookup(dt *doctype.DocType, fieldName string) *doctype.DocType {
-	// This function will be properly wired in Step 6 finalization.
-	return &doctype.DocType{Name: dt.Name + "__" + fieldName}
+// dtRegistryLookup looks up a child doctype from the registry for the given parent doctype and field.
+// The registry parameter comes from the site context.
+func dtRegistryLookup(registry *doctype.Registry, dt *doctype.DocType, fieldName string) *doctype.DocType {
+	field := dt.GetField(fieldName)
+	if field == nil || field.Options == "" {
+		return nil
+	}
+	return registry.Get(field.Options)
 }
 
 func parseChildRows(val any, field *doctype.Field, registry *doctype.Registry) ([]*doctype.Document, error) {
@@ -568,6 +582,10 @@ func RegisterRoutes(router *gin.Engine, registry *doctype.Registry, txManager *o
 	router.GET("/api/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "pong"})
 	})
+
+	// File upload endpoint.
+	router.POST("/api/upload", handler.HandleUpload)
+
 	_ = handler
 }
 
@@ -634,8 +652,9 @@ func (h *Handler) HandleWorkflowAction(c *gin.Context) {
 		Action string `json:"action"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		slog.Warn("invalid JSON in workflow action", "error", err)
 		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Error: map[string]string{"message": "Invalid JSON: " + err.Error()},
+			Error: map[string]string{"message": "Invalid request format"},
 		})
 		return
 	}
@@ -650,8 +669,9 @@ func (h *Handler) HandleWorkflowAction(c *gin.Context) {
 	// Load document.
 	doc, err := h.siteTx(c).GetDoc(dt, name, owner)
 	if err != nil {
+		slog.Warn("document get failed for workflow", "doctype", doctypeName, "name", name, "error", err)
 		c.JSON(http.StatusNotFound, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
+			Error: map[string]string{"message": "Document not found"},
 		})
 		return
 	}
@@ -715,10 +735,7 @@ func (h *Handler) HandleWorkflowAction(c *gin.Context) {
 		modifiedBy = "system"
 	}
 	if err := h.siteTx(c).Save(dt, doc, modifiedBy, owner); err != nil {
-		slog.Error("workflow save failed", "doctype", doctypeName, "name", name, "error", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": err.Error()},
-		})
+		internalError(c, "workflow save failed", err)
 		return
 	}
 
@@ -726,7 +743,7 @@ func (h *Handler) HandleWorkflowAction(c *gin.Context) {
 	dispatchNotifications(h.Registry, doctypeName, newState, doc)
 
 	c.JSON(http.StatusOK, Response{
-		Data: docToMap(doc, dt, nil),
+		Data: docToMap(doc, dt, h.siteRegistry(c),nil),
 		Meta: &Meta{DocType: doctypeName},
 	})
 }
@@ -768,7 +785,7 @@ func (h *Handler) HandleConfigVersions(c *gin.Context) {
 		"SELECT id, site, version, created_at, created_by, label, is_active FROM _kora_config_version ORDER BY version DESC LIMIT 50",
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": err.Error()}})
+		internalError(c, "config versions query failed", err)
 		return
 	}
 	defer rows.Close()
@@ -828,6 +845,68 @@ func (h *Handler) HandleConfigDiff(c *gin.Context) {
 	yaml.Unmarshal([]byte(toJSON), &to)
 	diff := doctype.DiffConfigs(from, to)
 	c.JSON(http.StatusOK, Response{Data: diff})
+}
+
+// HandleUpload handles file uploads via multipart form.
+// POST /api/upload
+// Stores files to sites/<site>/files/<YYYY>/<MM>/<filename>.
+func (h *Handler) HandleUpload(c *gin.Context) {
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: map[string]string{"message": "No file provided"},
+		})
+		return
+	}
+	defer file.Close()
+
+	// Determine site for directory scoping.
+	siteName := c.GetString("site_name")
+	if siteName == "" {
+		siteName = "default"
+	}
+
+	// Create directory: sites/<site>/files/<YYYY>/<MM>/
+	now := time.Now()
+	dir := filepath.Join("sites", siteName, "files",
+		fmt.Sprintf("%04d", now.Year()),
+		fmt.Sprintf("%02d", now.Month()))
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		internalError(c, "creating upload directory", err)
+		return
+	}
+
+	// Sanitize filename and avoid collisions.
+	filename := filepath.Base(header.Filename)
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+	dest := filepath.Join(dir, filename)
+	for i := 1; fileExists(dest); i++ {
+		dest = filepath.Join(dir, fmt.Sprintf("%s_%d%s", base, i, ext))
+	}
+
+	out, err := os.Create(dest)
+	if err != nil {
+		internalError(c, "creating file", err)
+		return
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, file); err != nil {
+		internalError(c, "writing file", err)
+		return
+	}
+
+	// Return the relative path for storing in an Attach field.
+	relPath := dest
+	c.JSON(http.StatusCreated, Response{
+		Data: map[string]string{"path": relPath, "filename": filepath.Base(dest)},
+	})
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // init registers this package's types for JSON handling.

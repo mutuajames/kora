@@ -3,6 +3,7 @@ package doctype
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/expr-lang/expr"
@@ -54,7 +55,7 @@ func (e *ExprEngine) Evaluate(exprStr string, doc *Document, userRoles []string)
 
 	if doc != nil {
 		for k, v := range doc.Fields {
-			env.Doc[k] = v
+			env.Doc[k] = normalizeExprValue(v)
 		}
 		env.Doc["name"] = doc.Name
 		env.Doc["doc_status"] = doc.DocStatus
@@ -127,6 +128,29 @@ func (e *ExprEngine) compile(exprStr string) (*vm.Program, error) {
 
 	e.cache[exprStr] = program
 	return program, nil
+}
+
+// normalizeExprValue converts string values from the database to numeric types
+// so that expressions like doc.total > 0 work correctly.
+func normalizeExprValue(v any) any {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case string:
+		// Try int first, then float.
+		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+			return float64(i)
+		}
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f
+		}
+		return val
+	case []byte:
+		return normalizeExprValue(string(val))
+	default:
+		return v
+	}
 }
 
 // EvalUser method for has_role. The expr library supports calling methods on structs.

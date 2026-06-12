@@ -67,6 +67,7 @@ func (h *Handler) RegisterRoutes(router *gin.Engine) {
 		console.GET("/sites", h.HandleSites)
 		console.GET("/sites/:name", h.HandleSiteDetail)
 		console.GET("/health", h.HandleHealth)
+		console.POST("/logout", h.HandleLogout)
 	}
 }
 
@@ -101,10 +102,12 @@ func (h *Handler) baseData(title, activeMenu string) pageData {
 
 // HandleLoginPage renders the login form.
 func (h *Handler) HandleLoginPage(c *gin.Context) {
-	// If already authenticated via cookie, redirect to console.
+	// If already authenticated via a valid session cookie, redirect to console.
 	if sid, _ := c.Cookie("kora_console_sid"); sid != "" {
-		c.Redirect(http.StatusFound, "/console/")
-		return
+		if h.guard.ValidateSession(sid) != "" {
+			c.Redirect(http.StatusFound, "/console/")
+			return
+		}
 	}
 
 	data := pageData{Title: "Console Login"}
@@ -132,9 +135,19 @@ func (h *Handler) HandleLogin(c *gin.Context) {
 		return
 	}
 
-	// Set console session cookie.
-	c.SetCookie("kora_console_sid", fmt.Sprintf("%s:%d", email, time.Now().Unix()), 86400, "/", "", false, true)
+	// Create a proper server-side session with a cryptographically random ID.
+	sid := h.guard.CreateSession(email)
+	auth.SetSecureCookie(c, "kora_console_sid", sid, int((24 * time.Hour).Seconds()), "/", true)
 	c.Redirect(http.StatusFound, "/console/")
+}
+
+// HandleLogout destroys the console session and redirects to login.
+func (h *Handler) HandleLogout(c *gin.Context) {
+	if sid, _ := c.Cookie("kora_console_sid"); sid != "" {
+		h.guard.DeleteSession(sid)
+	}
+	auth.SetSecureCookie(c, "kora_console_sid", "", -1, "/", true)
+	c.Redirect(http.StatusFound, "/console/login")
 }
 
 // HandleHome renders the system console dashboard.

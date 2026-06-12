@@ -145,9 +145,9 @@ Path-based access sets a `kora_site` cookie so API calls know which site context
 5. CORS headers (Access-Control-*)
 6. SiteRouter: Host header OR kora_site cookie OR /s/:site/ path → site context
 7. Rate limiter: token bucket check
-8. Auth middleware: kora_sid cookie → session in **site's DB** → user + roles
-9. CSRF check (POST/PUT/DELETE only)
-10. Permission check: user roles → allowed operation?
+8. Auth middleware: validates `kora_sid` cookie or `Authorization: Bearer` header → session in **site's DB** → user + roles. No `c.Next()` call — validation runs before CSRF check.
+9. CSRF check (POST/PUT/DELETE only): double-submit cookie pattern with constant-time comparison. Runs BEFORE the handler (SiteGuard ordering fix).
+10. Workflow actions: available transitions evaluated against the real document with server-enforced conditions.
 11. Constraint validation: field + document rules
 12. ORM operation: INSERT/UPDATE/DELETE/SELECT
 13. Response envelope: {data, meta}
@@ -167,17 +167,30 @@ Path-based access sets a `kora_site` cookie so API calls know which site context
 
 ### Expression Engine
 
-Uses `expr-lang/expr` for safe, sandboxed expression evaluation. Expressions have access to:
+Uses `expr-lang/expr` for safe, sandboxed expression evaluation. Used for workflow conditions, constraint conditions, and computed fields.
+
+**Workflow/constraint expressions** have access to:
 
 | Variable | Description |
 |---|---|
 | `doc` | Current document (all field values) |
 | `user` | Current user (name, roles) |
-| `today` | Today's date |
-| `now` | Current datetime |
+| `today()` | Today's date |
+| `now()` | Current datetime |
 | `len(x)` | Length of string or array |
+| `has_role('Role')` | Check if user has a specific role |
 
-Example: `doc.status == 'Approved' && doc.assigned_technician != ''`
+**Computed field expressions** support:
+
+| Function | Description |
+|---|---|
+| Arithmetic | `+`, `-`, `*`, `/` |
+| `SUM(table.column)` | Sum a child table column |
+| `COUNT(table)` | Count child table rows |
+| `ROUND(expr, N)` | Round to N decimal places |
+| `DATEDIFF(a, b)` | Days between two dates |
+
+Values are normalized from DB strings to float64 so expressions like `doc.total > 0` work correctly on persisted data. Document fields from MySQL (`[]byte`) are converted to numeric types during evaluation.
 
 ### Permission System
 
@@ -193,6 +206,15 @@ Permissions are defined per DocType, per Role. The engine enforces them at the A
 | `if_owner` | Above operations apply only to own documents |
 
 Administrator role bypasses all checks.
+
+### System Console
+
+A separate `/console` endpoint serves a server-rendered admin dashboard for system-level operations (site health, config versions, uptime). It uses **separate authentication** from site workspaces:
+
+- **Credentials**: `system_credentials.yaml` — email + bcrypt (cost 12) password, hashed at startup
+- **Auth methods**: HTTP Basic auth (`Authorization: Basic base64(email:password)`) or `kora_console_sid` session cookie
+- **Session store**: In-memory with cryptographically random 64-char session IDs, 24h expiry, background cleanup
+- **Middleware**: `SystemGuard` validates sessions server-side — no cookie forgery possible
 
 ### Workflow Engine
 
@@ -223,7 +245,7 @@ The engine compares the Registry against the live database schema (`INFORMATION_
 
 ### Computed Fields
 
-Fields with a `computed` expression are auto-calculated from other fields. The expression evaluator runs client-side whenever a referenced field changes.
+Fields with a `computed` expression are auto-calculated and **persisted server-side** on Insert and Save. The frontend also evaluates them client-side for instant feedback when editing.
 
 ```yaml
 - fieldname: line_total
@@ -234,9 +256,18 @@ Fields with a `computed` expression are auto-calculated from other fields. The e
 
 - fieldname: total
   computed: "ROUND(subtotal - discount, 2)"
+
+- fieldname: days_left
+  computed: "DATEDIFF(today(), end_date)"
 ```
 
-**Supported expressions:** arithmetic (`+`, `-`, `*`, `/`), `SUM(table.field)`, `ROUND(expr, N)`. The evaluator extracts field dependencies from the expression string and recomputes whenever any dependency changes.
+**Server-side evaluation:** The ORM's `Insert` and `Save` methods call `ComputeFields()` which:
+1. Evaluates child table computed fields first (e.g., `line_total`)
+2. Evaluates parent fields with `SUM`/`COUNT`/`DATEDIFF` next (e.g., `subtotal`)
+3. Evaluates dependent `ROUND` fields last (e.g., `total`)
+4. Persists all computed values via a follow-up UPDATE
+
+**Supported expressions:** arithmetic (`+`, `-`, `*`, `/`), `SUM(table.column)`, `COUNT(table)`, `ROUND(expr, N)`, `DATEDIFF(a, b)`, `today()`.
 
 ### Linked Field Auto-Population
 
@@ -308,18 +339,19 @@ kora/
 ├── common_site_config.yaml    # Shared config
 ├── docker-compose.yml         # MySQL + Redis
 ├── docs/                      # Documentation
-├── config/fieldwork/          # Sample app config
-│   ├── roles.yaml
-│   ├── permissions.yaml
-│   ├── scheduler.yaml
-│   └── doctypes/
-│       ├── customer.yaml
-│       ├── equipment.yaml
-│       ├── technician.yaml
-│       ├── work_order.yaml
-│       ├── work_order_item.yaml
-│       ├── work_order_workflow.yaml
-│       └── service_report.yaml
+├── config/                      # 10 ready-to-deploy SaaS apps
+│   ├── crm/                     # Contacts, Companies, Deals, Activities
+│   ├── helpdesk/                # Tickets, SLA tracking
+│   ├── projectmgmt/             # Projects, Tasks (self-referencing)
+│   ├── inventory/               # Products, Stock Movements
+│   ├── recruitment/             # Job Openings, Candidates
+│   ├── invoicing/               # Invoices, Line Items
+│   ├── propertymgmt/            # Properties, Leases
+│   ├── lms/                     # Courses, Lessons, Enrollments
+│   ├── events/                  # Events, Attendees, Venues
+│   ├── contracts/               # Contracts, Obligations
+│   ├── fieldwork/               # Field service (original sample)
+│   └── airtime/                 # Airtime sales (original sample)
 ├── sites/                     # Runtime site configs
 │   └── fieldwork.local/
 │       ├── site_config.yaml

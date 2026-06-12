@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/yourorg/kora/doctype"
 )
 
 // Filter represents a single filter condition: [field, operator, value].
@@ -69,6 +71,43 @@ func (fs *FilterSet) ToSQL() (string, []any, error) {
 	}
 
 	return strings.Join(clauses, " AND "), args, nil
+}
+
+// ValidateFields checks that all filter field names are valid columns in the DocType.
+// This prevents SQL injection via user-supplied field names in filter clauses.
+// System columns (name, owner, creation, modified, modified_by, doc_status, idx)
+// and all data fields are considered valid.
+func (fs *FilterSet) ValidateFields(dt *doctype.DocType) error {
+	validCols := filterValidColumns(dt)
+	for _, f := range fs.Filters {
+		field, ok := f[0].(string)
+		if !ok {
+			return fmt.Errorf("filter field must be a string")
+		}
+		if !validCols[field] {
+			return fmt.Errorf("unknown field %q in filter", field)
+		}
+	}
+	return nil
+}
+
+// filterValidColumns returns the set of valid column names for filtering.
+func filterValidColumns(dt *doctype.DocType) map[string]bool {
+	cols := map[string]bool{
+		"name":        true,
+		"owner":       true,
+		"creation":    true,
+		"modified":    true,
+		"modified_by": true,
+		"doc_status":  true,
+		"idx":         true,
+	}
+	for _, f := range dt.DataFields() {
+		if f.Fieldtype != "Table" {
+			cols[f.Fieldname] = true
+		}
+	}
+	return cols
 }
 
 func buildClause(field, op string, value any) (string, []any, error) {

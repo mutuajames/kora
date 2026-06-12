@@ -21,20 +21,26 @@ func NewSiteGuard(db *sql.DB) *SiteGuard {
 }
 
 // Middleware returns the combined site guard middleware.
-// It runs: Auth → CSRF → inject site context.
+// It runs: Auth → CSRF → site context → handler.
+// Uses validateSession (no c.Next() inside) so CSRF check runs BEFORE the handler,
+// preventing double-responses.
 func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
-	auth := AuthMiddleware(g.sessionMgr)
 	csrf := CSRFMiddleware()
 
 	return func(c *gin.Context) {
-		// Auth check (skips login, ping, and public paths).
-		auth(c)
-		if c.IsAborted() {
+		// Skip auth for login endpoint and health check.
+		path := c.Request.URL.Path
+		if path == "/api/auth/login" || path == "/api/ping" || path == "/workspace/login" {
+			c.Next()
+			return
+		}
+
+		// Auth check — validates session without calling c.Next().
+		if !validateSession(c, g.sessionMgr) {
 			return
 		}
 
 		// Inject site context from SiteRouter into handlers.
-		// This ensures every handler can read c.MustGet("site_db") and c.MustGet("site_registry").
 		if db, exists := c.Get("site_db"); exists {
 			if siteDB, ok := db.(*sql.DB); ok {
 				c.Set("db", siteDB)
@@ -44,7 +50,7 @@ func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 			c.Set("registry", reg)
 		}
 
-		// CSRF check (skip for GET/HEAD/OPTIONS, or if explicitly skipped).
+		// CSRF check runs BEFORE the handler — abort if token is missing/invalid.
 		if !skipCSRF {
 			csrf(c)
 			if c.IsAborted() {

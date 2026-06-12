@@ -1,0 +1,30 @@
+name: Venue
+module: Events
+title_field: venue_name
+sort_field: venue_name
+sort_order: ASC
+
+fields:
+  - fieldname: venue_name
+    fieldtype: Data
+    label: Venue Name
+    reqd: true
+    bold: true
+    in_list_view: true
+
+  - fieldname: address
+    fieldtype: Text
+    label: Address
+
+  - fieldname: capacity
+    fieldtype: Int
+    label: Max Capacity
+
+  - fieldname: contact_phone
+    fieldtype: Data
+    label: Phone
+    options: Phone
+
+  - fieldname: amenities
+    fieldtype: Text
+    label: Amenities

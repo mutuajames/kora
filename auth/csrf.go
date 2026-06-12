@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 
@@ -9,14 +10,46 @@ import (
 )
 
 // CSRFSecure controls the Secure flag on CSRF cookies. Set true in production with TLS.
+// Deprecated: SetSecureCookie auto-detects TLS; this is kept for explicit config overrides.
 var CSRFSecure = false
 
 // SetCSRFSecure sets the Secure flag for CSRF cookies.
 func SetCSRFSecure(secure bool) { CSRFSecure = secure }
 
+// SetSecureCookie sets a cookie with Secure auto-detected from the request's TLS state
+// and appends SameSite=Lax. Use this instead of c.SetCookie for security-sensitive cookies.
+func SetSecureCookie(c *gin.Context, name, value string, maxAge int, path string, httpOnly bool) {
+	secure := c.Request.TLS != nil
+	c.SetCookie(name, value, maxAge, path, "", secure, httpOnly)
+	// Gin's SetCookie doesn't support SameSite; append it manually.
+	appendSameSite(c, "Lax")
+}
+
+// appendSameSite appends a SameSite attribute to the most recently set cookie.
+func appendSameSite(c *gin.Context, sameSite string) {
+	headers := c.Writer.Header()["Set-Cookie"]
+	if len(headers) == 0 {
+		return
+	}
+	last := headers[len(headers)-1]
+	if !stringsContains(last, "SameSite") {
+		headers[len(headers)-1] = last + "; SameSite=" + sameSite
+	}
+}
+
+func stringsContains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 // CSRFMiddleware protects state-changing requests with a double-submit cookie pattern.
 // On first GET, a CSRF token is set as a cookie (HttpOnly=false so JS can read it).
 // On POST/PUT/DELETE, the X-Kora-CSRF-Token header must match the cookie value.
+// Token comparison uses constant-time comparison to prevent timing attacks.
 func CSRFMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip safe methods.
@@ -42,7 +75,8 @@ func CSRFMiddleware() gin.HandlerFunc {
 			headerToken = c.GetHeader("X-CSRF-Token")
 		}
 
-		if headerToken != cookieToken {
+		// Constant-time comparison to prevent timing attacks.
+		if subtle.ConstantTimeCompare([]byte(headerToken), []byte(cookieToken)) != 1 {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error":   "csrf_token_mismatch",
 				"message": "CSRF token mismatch.",
@@ -62,7 +96,7 @@ func ensureCSRFCookie(c *gin.Context) {
 	}
 
 	token := generateCSRFToken()
-	c.SetCookie("kora_csrf", token, 86400, "/", "", CSRFSecure, false)
+	SetSecureCookie(c, "kora_csrf", token, 86400, "/", false)
 	c.Set("csrf_token", token)
 }
 

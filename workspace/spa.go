@@ -82,7 +82,7 @@ func handlePathSite(c *gin.Context, sub fs.FS, sr *knet.SiteRouter, router *gin.
 	c.Set("site_name", site.Name)
 	c.Set("site_db", site.DB)
 	c.Set("site_registry", site.Registry)
-	c.SetCookie("kora_site", site.Name, 86400, "/", "", false, false)
+	knet.SetSecureCookie(c, "kora_site", site.Name, 86400, "/", false)
 
 	// API requests: re-dispatch through router so /api/* routes match.
 	if strings.HasPrefix(rest, "/api/") || rest == "/api" {

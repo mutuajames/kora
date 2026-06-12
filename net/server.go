@@ -62,7 +62,7 @@ func (s *Server) setupAutocert() {
 
 	s.Server.TLSConfig = &tls.Config{
 		GetCertificate: certManager.GetCertificate,
-		MinVersion:     tls.VersionTLS12,
+		MinVersion:     tls.VersionTLS13,
 	}
 
 	// Start HTTP→HTTPS redirect server on :80.

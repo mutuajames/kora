@@ -1,0 +1,42 @@
+- doctype: Project
+  role: Team Member
+  can_read: true
+  can_write: false
+  can_create: false
+  can_delete: false
+
+- doctype: Project
+  role: Project Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+
+- doctype: Project
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+
+- doctype: Task
+  role: Team Member
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  if_owner: true
+
+- doctype: Task
+  role: Project Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+
+- doctype: Task
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true

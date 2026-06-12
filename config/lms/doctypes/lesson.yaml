@@ -1,0 +1,24 @@
+name: Lesson
+module: Learning
+is_child_table: true
+title_field: lesson_name
+fields:
+  - fieldname: lesson_name
+    fieldtype: Data
+    label: Lesson Name
+    reqd: true
+    bold: true
+  - fieldname: content
+    fieldtype: Text
+    label: Content
+  - fieldname: video_url
+    fieldtype: Data
+    label: Video URL
+    options: URL
+  - fieldname: duration_minutes
+    fieldtype: Int
+    label: Duration (min)
+  - fieldname: sort_order
+    fieldtype: Int
+    label: Sort Order
+    default: "0"

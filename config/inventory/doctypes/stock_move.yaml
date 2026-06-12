@@ -1,0 +1,35 @@
+name: Stock Move
+module: Inventory
+is_child_table: true
+title_field: reference
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    reqd: true
+
+  - fieldname: move_type
+    fieldtype: Select
+    label: Type
+    options: |
+      Receipt
+      Shipment
+      Adjustment
+      Transfer
+    reqd: true
+    default: Receipt
+
+  - fieldname: qty_change
+    fieldtype: Float
+    label: Quantity Change
+    reqd: true
+    description: Positive for receipts, negative for shipments.
+
+  - fieldname: unit_cost
+    fieldtype: Currency
+    label: Unit Cost
+
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

@@ -1,0 +1,27 @@
+name: Enrollment
+module: Learning
+is_child_table: true
+title_field: student_name
+fields:
+  - fieldname: student_name
+    fieldtype: Data
+    label: Student Name
+    reqd: true
+    bold: true
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+    options: Email
+    reqd: true
+  - fieldname: enrolled_date
+    fieldtype: Date
+    label: Enrolled Date
+  - fieldname: completed_date
+    fieldtype: Date
+    label: Completed Date
+  - fieldname: progress_pct
+    fieldtype: Percent
+    label: Progress %
+  - fieldname: completed
+    fieldtype: Check
+    label: Completed

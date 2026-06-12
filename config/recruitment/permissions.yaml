@@ -1,0 +1,26 @@
+- doctype: Job Opening
+  role: Recruiter
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+- doctype: Job Opening
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+- doctype: Candidate
+  role: Recruiter
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Candidate
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true

@@ -1,0 +1,38 @@
+- doctype: Event
+  role: Event Coordinator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+- doctype: Event
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true
+- doctype: Attendee
+  role: Event Coordinator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Attendee
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Venue
+  role: Event Coordinator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Venue
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true

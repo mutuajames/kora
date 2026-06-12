@@ -1,0 +1,43 @@
+name: Job Opening
+module: Recruitment
+is_submittable: true
+title_field: title
+search_fields: title, department
+sort_field: modified
+sort_order: DESC
+fields:
+  - fieldname: title
+    fieldtype: Data
+    label: Job Title
+    reqd: true
+    bold: true
+    in_list_view: true
+  - fieldname: department
+    fieldtype: Data
+    label: Department
+    in_list_view: true
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+  - fieldname: salary_range
+    fieldtype: Data
+    label: Salary Range
+  - fieldname: status
+    fieldtype: Data
+    label: Status
+    default: Open
+    read_only: true
+    in_list_view: true
+  - fieldname: candidates
+    fieldtype: Table
+    label: Candidates
+    options: Candidate
+  - fieldname: candidate_count
+    fieldtype: Int
+    label: Applicants
+    computed: "COUNT(candidates)"
+    read_only: true
+    in_list_view: true

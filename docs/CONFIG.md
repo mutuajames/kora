@@ -363,14 +363,19 @@ Use `computed` to auto-calculate a field's value from other fields. The expressi
 
 **Supported functions:**
 
-| Expression | Description |
-|---|---|
-| `fieldname` | Current value of a field on the same document |
-| `a + b`, `a - b`, `a * b`, `a / b` | Arithmetic |
-| `SUM(table.field)` | Sum of a field across all rows in a child table |
-| `ROUND(expr, N)` | Round to N decimal places |
+| Expression | Description | Example |
+|---|---|---|
+| `fieldname` | Current value of a field on the same document | `quantity` |
+| `a + b`, `a - b`, `a * b`, `a / b` | Arithmetic | `quantity * unit_price` |
+| `SUM(table.field)` | Sum of a field across all rows in a child table | `SUM(items.line_total)` |
+| `COUNT(table)` | Number of rows in a child table | `COUNT(attendees)` |
+| `ROUND(expr, N)` | Round to N decimal places | `ROUND(subtotal * 1.1, 2)` |
+| `DATEDIFF(a, b)` | Days between two dates (fields, `today()`, or literals) | `DATEDIFF(today(), end_date)` |
+| `today()` | Current date at midnight | `DATEDIFF(due_date, today())` |
 
-**No code is written per doctype.** The frontend expression evaluator reads `computed` from the field config and applies it generically.
+Computed fields are evaluated **server-side** on Insert and Save, then persisted to the database via UPDATE. The frontend also evaluates them client-side for instant feedback. Values cascade: child `line_total` → parent `subtotal` → `total`.
+
+**No code is written per doctype.** The expression engine reads `computed` from the field config and evaluates it generically for any doctype.
 
 ### Linked Field Auto-Population
 
@@ -394,6 +399,27 @@ Use `linked_field` to auto-fill a field from a linked document when a Link field
 5. `computed` expressions depending on `unit_price` (like `line_total`) cascade automatically
 
 The user can override the auto-populated value. The `linked_field` property is generic — works for any Link field on any doctype.
+
+### File Upload
+
+Upload files via `POST /api/upload` with `multipart/form-data`. The endpoint returns a file path that can be stored in an `Attach` or `Attach Image` field.
+
+```bash
+curl -F "file=@resume.pdf" http://localhost:8000/api/upload
+# → {"data": {"path": "sites/crm/files/2026/06/resume.pdf", "filename": "resume.pdf"}}
+```
+
+Files are stored under `sites/<site>/files/<YYYY>/<MM>/`. Duplicate filenames get a numeric suffix to avoid collisions. The site is determined from the request context (Host header or `kora_site` cookie).
+
+**Attach field types:**
+- `Attach` — stores a file path. Renders as a text input + upload button in the UI
+- `Attach Image` — stores an image path. Renders with image preview
+
+```yaml
+- fieldname: resume
+  fieldtype: Attach
+  label: Resume
+```
 
 ## Site Config
 

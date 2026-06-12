@@ -43,8 +43,7 @@ func (s *Sender) Send(msg *Message) error {
 		"subject", msg.Subject,
 	)
 	// In production, this would use net/smtp or a library.
-	// For now, we log the full message.
-	slog.Debug("email body", "body", msg.Body)
+	// Body is not logged to avoid leaking sensitive content (e.g. reset tokens).
 	return nil
 }
 

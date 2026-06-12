@@ -1,0 +1,48 @@
+name: Property
+module: Property Management
+title_field: property_name
+search_fields: property_name, address
+sort_field: property_name
+sort_order: ASC
+fields:
+  - fieldname: property_name
+    fieldtype: Data
+    label: Property Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+  - fieldname: property_type
+    fieldtype: Select
+    label: Type
+    options: |
+      Residential
+      Commercial
+      Industrial
+      Land
+    in_standard_filter: true
+  - fieldname: address
+    fieldtype: Text
+    label: Address
+    reqd: true
+  - fieldname: units
+    fieldtype: Int
+    label: Total Units
+  - fieldname: occupied_units
+    fieldtype: Int
+    label: Occupied Units
+    computed: "COUNT(leases)"
+    read_only: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Active
+      Under Renovation
+      Off Market
+    default: Active
+    in_list_view: true
+  - fieldname: leases
+    fieldtype: Table
+    label: Leases
+    options: Lease

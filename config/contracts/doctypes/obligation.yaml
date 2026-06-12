@@ -1,0 +1,23 @@
+name: Obligation
+module: Contracts
+is_child_table: true
+title_field: description
+
+fields:
+  - fieldname: description
+    fieldtype: Data
+    label: Obligation
+    reqd: true
+    bold: true
+
+  - fieldname: responsible_party
+    fieldtype: Data
+    label: Responsible Party
+
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due Date
+
+  - fieldname: fulfilled
+    fieldtype: Check
+    label: Fulfilled

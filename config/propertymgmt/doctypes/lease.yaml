@@ -1,0 +1,37 @@
+name: Lease
+module: Property Management
+is_child_table: true
+title_field: tenant_name
+fields:
+  - fieldname: tenant_name
+    fieldtype: Data
+    label: Tenant Name
+    reqd: true
+    bold: true
+  - fieldname: unit_number
+    fieldtype: Data
+    label: Unit
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start Date
+    reqd: true
+  - fieldname: end_date
+    fieldtype: Date
+    label: End Date
+    reqd: true
+  - fieldname: monthly_rent
+    fieldtype: Currency
+    label: Monthly Rent
+    reqd: true
+  - fieldname: security_deposit
+    fieldtype: Currency
+    label: Security Deposit
+  - fieldname: days_left
+    fieldtype: Int
+    label: Days Remaining
+    computed: "DATEDIFF(today(), end_date)"
+    read_only: true
+  - fieldname: active
+    fieldtype: Check
+    label: Active
+    default: "1"

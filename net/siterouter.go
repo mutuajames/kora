@@ -191,7 +191,7 @@ func RegisterPathSiteRoutes(router *gin.Engine, sr *SiteRouter, spaFS fs.FS) {
 		if rest == "/workspace" || strings.HasPrefix(rest, "/workspace/") || rest == "/" {
 			// Serve SPA directly at the /s/:site/workspace URL.
 			// Set a site cookie so API calls know which site to use.
-			c.SetCookie("kora_site", site.Name, 86400, "/", "", false, false)
+			SetSecureCookie(c, "kora_site", site.Name, 86400, "/", false)
 			// Serve index.html from the SPA FS.
 			if spaFS != nil {
 				serveSPAFromFS(c, spaFS, "/index.html")

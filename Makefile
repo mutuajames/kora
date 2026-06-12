@@ -5,9 +5,9 @@ SITE ?= airtime.local
 CONFIG ?= config/airtime/
 PORT ?= 8000
 DB_USER ?= root
-DB_PASS ?= kora123
+DB_PASS ?=
 ADMIN_EMAIL ?= admin@airtime.local
-ADMIN_PASS ?= admin123
+ADMIN_PASS ?=
 TAG ?= v0.1.0
 
 ## Build
@@ -53,11 +53,9 @@ fmt:                               ## Format code
 	cd ui && bunx prettier --write 'src/**/*.{ts,tsx}'
 
 ## Release
-release:                           ## Tag and push a release (TAG=v0.2.0)
+release:                           ## Full release: test → lint → changelog → bump → tag → push (TAG=v0.2.0)
 	@test -n "$(TAG)" || (echo "Usage: make release TAG=v0.2.0" && exit 1)
-	git tag -a $(TAG) -m "$(TAG)"
-	git push origin $(TAG)
-	@echo "Release $(TAG) pushed — GitHub Actions will create the release."
+	./scripts/release.sh $(TAG)
 
 ## Cleanup
 clean:                             ## Remove build artifacts

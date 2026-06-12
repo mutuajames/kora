@@ -1,0 +1,36 @@
+name: Candidate
+module: Recruitment
+is_child_table: true
+title_field: full_name
+fields:
+  - fieldname: full_name
+    fieldtype: Data
+    label: Full Name
+    reqd: true
+    bold: true
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+    options: Email
+    reqd: true
+  - fieldname: phone
+    fieldtype: Data
+    label: Phone
+    options: Phone
+  - fieldname: resume_path
+    fieldtype: Attach
+    label: Resume
+  - fieldname: stage
+    fieldtype: Select
+    label: Stage
+    options: |
+      Applied
+      Screening
+      Interview
+      Offer
+      Hired
+      Rejected
+    default: Applied
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

@@ -1,0 +1,25 @@
+name: Invoice Item
+module: Invoicing
+is_child_table: true
+title_field: description
+
+fields:
+  - fieldname: description
+    fieldtype: Data
+    label: Description
+    reqd: true
+    bold: true
+  - fieldname: quantity
+    fieldtype: Float
+    label: Quantity
+    default: "1"
+    reqd: true
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit Price
+    reqd: true
+  - fieldname: line_total
+    fieldtype: Currency
+    label: Line Total
+    computed: "quantity * unit_price"
+    read_only: true

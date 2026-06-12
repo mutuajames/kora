@@ -1,0 +1,62 @@
+name: Invoice
+module: Invoicing
+is_submittable: true
+title_field: invoice_number
+search_fields: invoice_number, customer
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: invoice_number
+    fieldtype: Data
+    label: Invoice #
+    reqd: true
+    bold: true
+    in_list_view: true
+  - fieldname: customer
+    fieldtype: Data
+    label: Customer
+    reqd: true
+    in_list_view: true
+  - fieldname: invoice_date
+    fieldtype: Date
+    label: Invoice Date
+    reqd: true
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due Date
+    reqd: true
+    computed: "DATEDIFF(today(), due_date)"
+  - fieldname: items
+    fieldtype: Table
+    label: Line Items
+    options: Invoice Item
+    constraints:
+      - type: min_rows
+        value: 1
+        message: "At least one line item is required."
+  - fieldname: subtotal
+    fieldtype: Currency
+    label: Subtotal
+    computed: "SUM(items.line_total)"
+    read_only: true
+  - fieldname: tax_rate
+    fieldtype: Percent
+    label: Tax Rate
+    default: "0"
+  - fieldname: tax_amount
+    fieldtype: Currency
+    label: Tax
+    computed: "ROUND(subtotal * tax_rate / 100, 2)"
+    read_only: true
+  - fieldname: total
+    fieldtype: Currency
+    label: Total
+    computed: "ROUND(subtotal + tax_amount, 2)"
+    read_only: true
+  - fieldname: status
+    fieldtype: Data
+    label: Status
+    default: Draft
+    read_only: true
+    in_list_view: true

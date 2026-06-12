@@ -5,6 +5,7 @@ import { fetchDocument, updateDocument } from '@/lib/api/resources'
 import { applyComputedFields } from '@/lib/computed-fields'
 import { FieldRenderer } from '@/components/forms/FieldRenderer'
 import { RelatedDocs } from '@/components/forms/RelatedDocs'
+import { WorkflowActions } from '@/components/forms/WorkflowActions'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -148,6 +149,15 @@ export default function EditFormPage() {
 
       {error && (
         <div className="mb-4 flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" /><p className="text-destructive">{error}</p></div>
+      )}
+
+      {/* Workflow actions */}
+      {schemaQuery.data?.workflow && (
+        <WorkflowActions
+          doctype={doctype}
+          name={name}
+          currentState={String(statusLabel)}
+        />
       )}
 
       {/* Form fields */}

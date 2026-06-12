@@ -1,0 +1,53 @@
+name: Course
+module: Learning
+title_field: course_name
+search_fields: course_name, description
+sort_field: course_name
+sort_order: ASC
+fields:
+  - fieldname: course_name
+    fieldtype: Data
+    label: Course Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+  - fieldname: instructor
+    fieldtype: Data
+    label: Instructor
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Technical
+      Business
+      Leadership
+      Compliance
+      Other
+    in_standard_filter: true
+  - fieldname: duration_hours
+    fieldtype: Float
+    label: Duration (hours)
+  - fieldname: price
+    fieldtype: Currency
+    label: Price
+  - fieldname: published
+    fieldtype: Check
+    label: Published
+  - fieldname: enrollment_count
+    fieldtype: Int
+    label: Enrollments
+    computed: "COUNT(enrollments)"
+    read_only: true
+    in_list_view: true
+  - fieldname: lessons
+    fieldtype: Table
+    label: Lessons
+    options: Lesson
+  - fieldname: enrollments
+    fieldtype: Table
+    label: Enrollments
+    options: Enrollment

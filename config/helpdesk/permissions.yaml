@@ -1,0 +1,25 @@
+- doctype: Ticket
+  role: Support Agent
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: true
+
+- doctype: Ticket
+  role: Support Manager
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+  can_submit: true
+  if_owner: false
+
+- doctype: Ticket
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+  can_submit: true

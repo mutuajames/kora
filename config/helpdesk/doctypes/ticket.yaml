@@ -1,0 +1,73 @@
+name: Ticket
+module: Help Desk
+is_submittable: true
+title_field: subject
+search_fields: subject, description
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: subject
+    fieldtype: Data
+    label: Subject
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+
+  - fieldname: contact
+    fieldtype: Link
+    label: Contact
+    options: Contact
+
+  - fieldname: priority
+    fieldtype: Select
+    label: Priority
+    options: |
+      Low
+      Medium
+      High
+      Critical
+    default: Medium
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: category
+    fieldtype: Select
+    label: Category
+    options: |
+      Bug
+      Feature Request
+      Question
+      Incident
+      Maintenance
+    in_standard_filter: true
+
+  - fieldname: assigned_to
+    fieldtype: Data
+    label: Assigned To
+
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due Date
+
+  - fieldname: resolution
+    fieldtype: Text
+    label: Resolution
+
+  - fieldname: sla_breach
+    fieldtype: Check
+    label: SLA Breach
+    read_only: true
+
+  - fieldname: status
+    fieldtype: Data
+    label: Status
+    default: Open
+    read_only: true
+    in_list_view: true
+    in_standard_filter: true

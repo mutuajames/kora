@@ -39,9 +39,27 @@ Three YAML files. One binary. **Zero application code.**
 
 ---
 
-## Sample Apps
+## What You Can Build
 
-### Todo
+**[10 complete SaaS applications](USECASES.md) — all in YAML config, zero application code:**
+
+| # | Application | Highlights |
+|---|-------------|------------|
+| 1 | **CRM** | Deal pipeline, computed totals, sales permissions |
+| 2 | **Help Desk** | Ticket lifecycle, agent assignment, SLA tracking |
+| 3 | **Project Management** | Task hierarchy, progress tracking, COUNT aggregation |
+| 4 | **Inventory** | Real-time stock levels, warehouse movements |
+| 5 | **Recruitment** | Job pipeline, candidate tracking, resume uploads |
+| 6 | **Invoicing** | Line items, tax calculation, payment lifecycle |
+| 7 | **Property Management** | Lease tracking, occupancy, DATEDIFF expiry |
+| 8 | **LMS** | Course builder, enrollments, student tracking |
+| 9 | **Event Management** | Registrations, capacity management, check-in |
+| 10 | **Contract Management** | Obligations, renewals, DATEDIFF countdown |
+
+Each comes with database, REST API, React admin panel, role-based permissions, and workflow automation — from 3-6 YAML files.
+
+### Quick Example: Todo
+
 ```yaml
 name: Todo
 module: Tasks
@@ -61,13 +79,6 @@ fields:
     fieldtype: Date
 ```
 
-### Airtime Sales
-```
-Customer → Order → Product workflow
-automated price calculation
-role-based approvals
-```
-
 ---
 
 ## Quick Start
@@ -85,6 +96,7 @@ Open **http://localhost:8000/s/todo/workspace**
 
 ## Documentation
 
+- [**What You Can Build**](USECASES.md) — 10 SaaS applications with config examples
 - [Setup Guide](SETUP.md) — Prerequisites, installation, multi-site, production
 - [Configuration Reference](CONFIG.md) — DocTypes, fields, constraints, workflows
 - [API Reference](API.md) — REST endpoints, auth, envelope format

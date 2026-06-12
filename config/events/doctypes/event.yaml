@@ -1,0 +1,75 @@
+name: Event
+module: Events
+is_submittable: true
+title_field: event_name
+search_fields: event_name, venue
+sort_field: event_date
+sort_order: ASC
+
+fields:
+  - fieldname: event_name
+    fieldtype: Data
+    label: Event Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: event_type
+    fieldtype: Select
+    label: Event Type
+    options: |
+      Conference
+      Workshop
+      Webinar
+      Meetup
+      Social
+    in_standard_filter: true
+
+  - fieldname: event_date
+    fieldtype: Datetime
+    label: Event Date
+    reqd: true
+    in_list_view: true
+
+  - fieldname: venue
+    fieldtype: Link
+    label: Venue
+    options: Venue
+
+  - fieldname: capacity
+    fieldtype: Int
+    label: Capacity
+
+  - fieldname: registration_count
+    fieldtype: Int
+    label: Registrations
+    computed: "COUNT(attendees)"
+    read_only: true
+    in_list_view: true
+
+  - fieldname: available_spots
+    fieldtype: Int
+    label: Spots Left
+    computed: "capacity - registration_count"
+    read_only: true
+
+  - fieldname: ticket_price
+    fieldtype: Currency
+    label: Ticket Price
+
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+
+  - fieldname: status
+    fieldtype: Data
+    label: Status
+    default: Draft
+    read_only: true
+    in_list_view: true
+
+  - fieldname: attendees
+    fieldtype: Table
+    label: Attendees
+    options: Attendee

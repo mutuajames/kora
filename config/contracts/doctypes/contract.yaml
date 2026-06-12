@@ -1,0 +1,81 @@
+name: Contract
+module: Contracts
+is_submittable: true
+title_field: contract_name
+search_fields: contract_name, party
+sort_field: modified
+sort_order: DESC
+
+fields:
+  - fieldname: contract_name
+    fieldtype: Data
+    label: Contract Name
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: party
+    fieldtype: Data
+    label: Counterparty
+    reqd: true
+    in_list_view: true
+
+  - fieldname: contract_type
+    fieldtype: Select
+    label: Type
+    options: |
+      Service Agreement
+      License Agreement
+      Employment
+      Lease
+      Vendor
+      Other
+    in_standard_filter: true
+
+  - fieldname: start_date
+    fieldtype: Date
+    label: Start Date
+    reqd: true
+
+  - fieldname: end_date
+    fieldtype: Date
+    label: End Date
+    reqd: true
+
+  - fieldname: value
+    fieldtype: Currency
+    label: Contract Value
+
+  - fieldname: days_remaining
+    fieldtype: Int
+    label: Days Remaining
+    computed: "DATEDIFF(today(), end_date)"
+    read_only: true
+    in_list_view: true
+
+  - fieldname: auto_renewal
+    fieldtype: Check
+    label: Auto Renewal
+
+  - fieldname: renewal_notice_days
+    fieldtype: Int
+    label: Renewal Notice (days)
+    default: "30"
+
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+
+  - fieldname: status
+    fieldtype: Data
+    label: Status
+    default: Draft
+    read_only: true
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: obligations
+    fieldtype: Table
+    label: Obligations
+    options: Obligation

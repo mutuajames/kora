@@ -1,0 +1,24 @@
+- doctype: Product
+  role: Warehouse Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: false
+- doctype: Product
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Stock Move
+  role: Warehouse Operator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true
+- doctype: Stock Move
+  role: Administrator
+  can_read: true
+  can_write: true
+  can_create: true
+  can_delete: true

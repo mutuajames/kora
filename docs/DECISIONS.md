@@ -346,3 +346,98 @@
 **Trade-offs:**
 - Creates a new SessionManager on each auth request (lightweight — just wraps `*sql.DB`)
 - Login at `/s/airtime` with `admin@fieldwork.local` credentials fails (correct behavior — credentials are per-site)
+
+---
+
+## ADR-017: Server-Side Computed Field Evaluation
+
+**Date:** 2026-06-12
+**Status:** Accepted
+
+**Context:** Computed fields (`computed: "quantity * unit_price"`) were initially evaluated only client-side in the React SPA. This meant computed values were never persisted and couldn't be used in workflow conditions (`doc.total > 0`).
+
+**Decision:** Evaluate computed fields server-side in the ORM layer during Insert and Save. Values are persisted via a follow-up UPDATE after child items are processed.
+
+**Rationale:**
+- Workflow conditions can reference computed fields (`doc.total > 0`)
+- Computed values survive server restarts and are visible in API responses
+- Multi-pass evaluation ensures dependencies resolve: child fields → aggregates → dependent fields
+- Frontend still evaluates for instant feedback during editing
+
+**Implementation:** `doctype/computed.go` — `ComputeFields()` called by ORM Insert/Save. Parses expressions with regex patterns for `SUM()`, `COUNT()`, `DATEDIFF()`, `ROUND()`, then compiles arithmetic with `expr-lang/expr`. Three-pass evaluation: aggregates first, then DATEDIFF/ROUND, then simple arithmetic.
+
+---
+
+## ADR-018: Transaction-Based Save for Child Tables
+
+**Date:** 2026-06-12
+**Status:** Accepted
+
+**Context:** `Save()` for documents with child tables used separate implicit transactions for DELETE (old children) and INSERT (new children). This caused "Duplicate entry" errors when child names collided.
+
+**Decision:** Wrap the entire Save operation (UPDATE parent + DELETE children + INSERT children + computed field persistence) in a single database transaction. Use `INSERT ... ON DUPLICATE KEY UPDATE` for child rows as defense-in-depth.
+
+**Rationale:**
+- Atomicity: if any step fails, all changes roll back
+- Eliminates race conditions between DELETE and INSERT
+- `ON DUPLICATE KEY UPDATE` handles edge cases where a child row already exists
+- A `sqlExecutor` interface abstracts `*sql.DB` and `*sql.Tx` so insert logic works in both contexts
+
+---
+
+## ADR-019: CSRF Middleware Ordering Fix
+
+**Date:** 2026-06-12
+**Status:** Accepted
+
+**Context:** `SiteGuard.Middleware()` composed `AuthMiddleware` and `CSRFMiddleware` by calling them as functions. `AuthMiddleware` called `c.Next()` internally, which dispatched to the handler BEFORE `CSRFMiddleware` ran. This caused every POST/PUT response to contain both the handler's JSON AND a CSRF error — two concatenated JSON bodies.
+
+**Decision:** Extract `validateSession()` from `AuthMiddleware` — a pure validation function that returns `bool` without calling `c.Next()`. SiteGuard calls it directly, then runs CSRF check, then calls `c.Next()` once at the end.
+
+**Rationale:**
+- Handler runs only after ALL middleware checks pass
+- No double-responses — CSRF aborts before the handler executes
+- `AuthMiddleware` still works standalone (wraps `validateSession` + `c.Next()`) for routes outside SiteGuard
+
+---
+
+## ADR-020: Console Authentication with Basic Auth + Session Tokens
+
+**Date:** 2026-06-12
+**Status:** Accepted
+
+**Context:** The original `/console` SystemGuard accepted ANY non-empty `kora_console_sid` cookie as authenticated — zero server-side validation. The "token" was `email:unix_timestamp` with no randomness.
+
+**Decision:** 
+- In-memory session store with cryptographically random 64-char hex session IDs
+- Server-side validation on every request — no cookie forgery possible
+- 24-hour session expiry with background cleanup goroutine
+- Two auth methods: HTTP Basic auth (`base64(email:password)`) for API clients, session cookie for browser
+- bcrypt cost 12 for system admin password (vs default 10)
+- Plaintext `Bearer email:password` removed — was never properly base64-decoded
+
+**Rationale:**
+- System console is single-admin, so in-memory store is sufficient (no DB dependency)
+- Basic auth enables scripting and API access without browser cookies
+- Session cookies enable browser-based console management
+- Background cleanup prevents memory leak from expired sessions
+
+---
+
+## ADR-021: Cookie Security Defaults
+
+**Date:** 2026-06-12
+**Status:** Accepted
+
+**Context:** All cookies (`kora_sid`, `kora_csrf`, `kora_console_sid`, `kora_site`) were set with `Secure: false` hardcoded and no `SameSite` attribute. This made them vulnerable to network interception and cross-site request inclusion.
+
+**Decision:** 
+- `Secure` flag auto-detected from `c.Request.TLS != nil` — cookies are Secure when the request is over HTTPS
+- `SameSite=Lax` appended to all cookies — prevents cross-site request inclusion while allowing top-level navigation
+- `SetSecureCookie()` helper in both `auth` and `net` packages for consistent cookie creation
+- CSRF token comparison uses `crypto/subtle.ConstantTimeCompare` to prevent timing attacks
+
+**Rationale:**
+- No configuration needed — Secure flag adapts to deployment context
+- SameSite=Lax is the modern default (balances security and usability)
+- Constant-time comparison prevents timing side-channel attacks on CSRF tokens

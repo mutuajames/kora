@@ -1,0 +1,103 @@
+name: Activity
+module: CRM
+title_field: subject
+search_fields: subject, description, contact, deal
+sort_field: due_date
+sort_order: ASC
+
+fields:
+  # --- Section: Activity Info ---
+  - fieldname: section_activity
+    fieldtype: Section Break
+    label: Activity Details
+
+  - fieldname: col_left
+    fieldtype: Column Break
+
+  - fieldname: subject
+    fieldtype: Data
+    label: Subject
+    reqd: true
+    bold: true
+    in_list_view: true
+    search_index: true
+
+  - fieldname: activity_type
+    fieldtype: Select
+    label: Type
+    options: |
+      Call
+      Meeting
+      Email
+      Task
+      Note
+      Follow-up
+    reqd: true
+    default: Task
+    in_list_view: true
+    in_standard_filter: true
+
+  - fieldname: priority
+    fieldtype: Select
+    label: Priority
+    options: |
+      Low
+      Medium
+      High
+      Urgent
+    default: Medium
+    in_list_view: true
+
+  - fieldname: col_right
+    fieldtype: Column Break
+
+  - fieldname: due_date
+    fieldtype: Date
+    label: Due Date
+    in_list_view: true
+
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Open
+      In Progress
+      Completed
+      Cancelled
+    default: Open
+    in_list_view: true
+    in_standard_filter: true
+
+  # --- Section: Related To ---
+  - fieldname: section_related
+    fieldtype: Section Break
+    label: Related To
+
+  - fieldname: contact
+    fieldtype: Link
+    label: Contact
+    options: Contact
+    in_list_view: true
+
+  - fieldname: company
+    fieldtype: Link
+    label: Company
+    options: Company
+
+  - fieldname: deal
+    fieldtype: Link
+    label: Deal
+    options: Deal
+
+  # --- Section: Details ---
+  - fieldname: section_details
+    fieldtype: Section Break
+    label: Details
+
+  - fieldname: description
+    fieldtype: Text
+    label: Description
+
+  - fieldname: outcome
+    fieldtype: Text
+    label: Outcome / Notes

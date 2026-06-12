@@ -1,0 +1,29 @@
+name: Attendee
+module: Events
+is_child_table: true
+title_field: attendee_name
+
+fields:
+  - fieldname: attendee_name
+    fieldtype: Data
+    label: Name
+    reqd: true
+    bold: true
+
+  - fieldname: email
+    fieldtype: Data
+    label: Email
+    options: Email
+
+  - fieldname: ticket_type
+    fieldtype: Select
+    label: Ticket Type
+    options: |
+      General
+      VIP
+      Speaker
+      Staff
+
+  - fieldname: check_in
+    fieldtype: Check
+    label: Checked In
