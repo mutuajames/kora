@@ -1,3 +1,8 @@
+## v0.4.0 — 2026-06-13
+### Security
+- v0.2.0: ORM optimization, YAML validation, security hardening, permission UX
+
+
 ## v0.3.0 — 2026-06-13
 
 ### Features
