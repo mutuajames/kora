@@ -1,3 +1,16 @@
+## v0.3.0 — 2026-06-13
+
+### Features
+- feat: Administrator tab — visual doctype builder, permissions, workflows, versioning
+- fix: create embed placeholder before go vet in CI
+
+### Fixes
+- fix: create embed placeholder before go vet in CI
+
+### Documentation
+- docs: update CLAUDE.md with release process and CI changes
+
+
 ## v0.2.0 — 2026-06-12
 
 ### Features
@@ -19,4 +32,3 @@
 ### Documentation
 - Add AI skills guide for creating Kora config files
 - Add Makefile, update README, CLAUDE.md, and docs with make commands
-
